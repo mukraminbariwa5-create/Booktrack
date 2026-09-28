@@ -1,0 +1,9 @@
+# local database for tests
+*.sqlite
+# user uploads. Demo cover art stays on your own machine (publisher artwork isn't
+# redistributed); books without a cover file show a generated typographic cover.
+uploads/covers/*
+!uploads/covers/.gitkeep
+uploads/pdfs/*
+!uploads/pdfs/.htaccess
+!uploads/pdfs/.gitkeep

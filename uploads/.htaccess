@@ -1,0 +1,7 @@
+# Uploaded files are data, never code
+<FilesMatch "\.(php|phtml|phar|php\d|pl|py|cgi|sh)$">
+  Require all denied
+</FilesMatch>
+<IfModule mod_php.c>
+  php_flag engine off
+</IfModule>

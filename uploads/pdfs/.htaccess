@@ -1,0 +1,2 @@
+# PDFs are streamed by read.php to signed-in users only
+Require all denied
