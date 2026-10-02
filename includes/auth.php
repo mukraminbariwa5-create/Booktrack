@@ -82,10 +82,42 @@ function attempt_login(string $username, string $password): ?string
     }
 
     login_attempts_sql('DELETE FROM login_attempts WHERE username = ?', [$username]);
-    if (session_status() === PHP_SESSION_ACTIVE) session_regenerate_id(true);
-    $_SESSION['user_id'] = (int)$user['id'];
-    q('UPDATE users SET last_login_at = ? WHERE id = ?', [date('Y-m-d H:i:s'), $user['id']]);
+    sign_in_as((int)$user['id']);
     return null;
+}
+
+/** Start a fresh session for a user (new session id, so an old cookie can't be reused). */
+function sign_in_as(int $userId): void
+{
+    if (session_status() === PHP_SESSION_ACTIVE) session_regenerate_id(true);
+    $_SESSION['user_id'] = $userId;
+    q('UPDATE users SET last_login_at = ? WHERE id = ?', [date('Y-m-d H:i:s'), $userId]);
+}
+
+/**
+ * Validate a new member's details. Returns ['field' => 'message'] for every
+ * problem, so each message can be shown right under its field.
+ */
+function validate_new_member(array $d, string $password, string $confirm): array
+{
+    $e = [];
+    if ($d['name'] === '') $e['name'] = 'Enter your full name.';
+    elseif (mb_strlen($d['name']) > 120) $e['name'] = 'Use 120 characters or fewer.';
+
+    if ($d['username'] === '') $e['username'] = 'Choose a username.';
+    elseif (!preg_match('/^[a-z0-9._-]{3,60}$/', $d['username'])) $e['username'] = 'Use 3 to 60 letters, numbers, dots, dashes or underscores.';
+    elseif (q_val('SELECT COUNT(*) FROM users WHERE username = ?', [$d['username']])) $e['username'] = 'That username is taken. Try another.';
+
+    if ($d['email'] === '') $e['email'] = 'Enter your email address.';
+    elseif (!filter_var($d['email'], FILTER_VALIDATE_EMAIL) || mb_strlen($d['email']) > 160) $e['email'] = 'Enter a valid email address, like name@example.com.';
+    elseif (q_val('SELECT COUNT(*) FROM users WHERE LOWER(email) = ?', [strtolower($d['email'])])) $e['email'] = 'An account already uses this email. Try signing in instead.';
+
+    if ($d['phone'] !== '' && !preg_match('/^[0-9+()\s-]{7,40}$/', $d['phone'])) $e['phone'] = 'Use numbers, spaces, + or - only.';
+
+    if (strlen($password) < 8) $e['password'] = 'Use at least 8 characters.';
+    elseif (strlen($password) > 72) $e['password'] = 'Use 72 characters or fewer.';
+    elseif ($password !== $confirm) $e['confirm'] = 'The passwords don\'t match.';
+    return $e;
 }
 
 function logout(): void

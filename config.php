@@ -17,10 +17,23 @@ return [
         'sqlite_path' => __DIR__ . '/database/booktrack.sqlite',
     ],
 
+    'auth' => [
+        'allow_registration' => true,  // show "Create an account" so people can sign up as members
+        'show_demo_logins'   => true,  // one-click demo sign-in links on the sign-in page; turn off for real use
+    ],
+
     'library' => [
         'loan_days'       => 14,   // default loan period
         'max_active_loans' => 3,   // how many books a member can hold at once
         'due_soon_days'   => 3,    // highlight loans due within this many days
+    ],
+
+    // Real covers from Open Library: fetched when a book is added or edited
+    // without one, and from "Find cover" / "Find missing covers" in Books.
+    'covers' => [
+        'auto_fetch' => true,
+        'api'        => 'https://openlibrary.org',
+        'images'     => 'https://covers.openlibrary.org',
     ],
 
     'uploads' => [

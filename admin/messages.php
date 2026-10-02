@@ -2,105 +2,144 @@
 require __DIR__ . '/../includes/bootstrap.php';
 $user = require_role('admin');
 
-if (is_post()) {
-    verify_csrf();
-    $msg = q_one('SELECT m.*, u.name AS member_name FROM messages m JOIN users u ON u.id = m.user_id WHERE m.id = ?', [input_int('id')]);
-    if (!$msg) {
-        flash('error', 'That message no longer exists.');
-        back('admin/messages.php');
-    }
-    switch (input('action')) {
-        case 'reply':
-            $reply = input('reply');
-            if ($reply === '') {
-                flash('error', 'Write a reply before sending.');
-                break;
-            }
-            q('UPDATE messages SET reply = ?, replied_at = ?, is_read = 1, reply_seen = 0 WHERE id = ?', [mb_substr($reply, 0, 4000), date('Y-m-d H:i:s'), $msg['id']]);
-            log_activity('message.replied', $msg['subject']);
-            flash('success', 'Reply sent to ' . $msg['member_name'] . '.');
-            break;
-        case 'read':
-            q('UPDATE messages SET is_read = 1 - is_read WHERE id = ?', [$msg['id']]);
-            break;
-        case 'delete':
-            q('DELETE FROM messages WHERE id = ?', [$msg['id']]);
-            log_activity('message.deleted', $msg['subject']);
-            flash('success', 'Message deleted.');
-            break;
-    }
-    back('admin/messages.php');
+$search = input('q');
+$filter = input('filter') === 'unread' ? 'unread' : 'all';
+$selectedId = input_int('member');
+
+
+// The member whose chat is open (may have no messages yet: "start a conversation").
+$member = $selectedId
+    ? q_one("SELECT id, name, username, email, phone, is_active, created_at FROM users WHERE id = ? AND role = 'member'", [$selectedId])
+    : null;
+if ($selectedId && !$member) {
+    flash('error', 'That member could not be found.');
+    redirect('admin/messages.php');
 }
 
-$tabs = ['unread' => 'Unread', 'unanswered' => 'Awaiting reply', 'all' => 'All messages'];
-$conds = ['unread' => 'm.is_read = 0', 'unanswered' => 'm.reply IS NULL', 'all' => '1 = 1'];
-$tab = array_key_exists(input('tab'), $tabs) ? input('tab') : ((int)q_val('SELECT COUNT(*) FROM messages WHERE is_read = 0') ? 'unread' : 'all');
-$counts = [];
-foreach ($conds as $k => $c) $counts[$k] = (int)q_val("SELECT COUNT(*) FROM messages m WHERE $c");
+$thread = [];
+if ($member) {
+    $thread = chat_thread((int)$member['id']);
+    chat_mark_read((int)$member['id'], 'library');
+    $loanCount = active_loan_count((int)$member['id']);
+    $overdueCount = (int)q_val("SELECT COUNT(*) FROM loans WHERE user_id = ? AND status = 'borrowed' AND due_at < ?", [$member['id'], today()]);
+}
 
-$p = paginate($counts[$tab], 10);
-$messages = q_all("SELECT m.*, u.name AS member_name, u.username FROM messages m JOIN users u ON u.id = m.user_id
-                   WHERE {$conds[$tab]} ORDER BY m.created_at DESC LIMIT {$p['per']} OFFSET {$p['offset']}");
+// Listed after marking the open chat as read, so its unread badge clears straight away.
+$conversations = chat_conversations($search, $filter === 'unread');
+$unreadTotal = chat_unread_conversations();
+
+// Members without a conversation yet, for "New conversation".
+$startable = q_all("SELECT u.id, u.name, u.username FROM users u WHERE u.role = 'member' AND u.is_active = 1
+                    AND NOT EXISTS (SELECT 1 FROM chat_messages c WHERE c.member_id = u.id) ORDER BY u.name");
 
 $title = 'Messages';
 $active = 'messages';
+$bodyClass = 'page-chat';
 require __DIR__ . '/../includes/partials/header.php';
+
+$listUrl = fn(array $extra = []) => url('admin/messages.php', array_filter($extra + ['q' => $search, 'filter' => $filter === 'unread' ? 'unread' : '']));
 ?>
-<header class="page-head">
-  <div class="page-head__title">
-    <h1>Messages</h1>
-    <p>Questions, book requests and problem reports from members.</p>
-  </div>
-</header>
+<h1 class="sr-only">Messages</h1>
+<div class="inbox <?= $member ? 'has-open' : '' ?>">
+  <aside class="inbox__list" aria-label="Conversations">
+    <div class="inbox__top">
+      <div class="row" style="justify-content:space-between">
+        <h2>Messages</h2>
+        <button class="btn btn--sm" type="button" data-open="new-chat"><?= icon('plus') ?> New</button>
+      </div>
+      <form method="get" class="search search--sm" role="search">
+        <?= icon('search') ?>
+        <label class="sr-only" for="conv-q">Search conversations</label>
+        <input id="conv-q" type="search" name="q" autocomplete="off" spellcheck="false" value="<?= e($search) ?>" placeholder="Search members" data-filter-list="#conv-list">
+        <?php if ($filter === 'unread'): ?><input type="hidden" name="filter" value="unread"><?php endif; ?>
+      </form>
+      <nav class="seg" aria-label="Filter conversations">
+        <a href="<?= e(url('admin/messages.php', array_filter(['q' => $search]))) ?>" <?= $filter === 'all' ? 'aria-current="page"' : '' ?>>All</a>
+        <a href="<?= e(url('admin/messages.php', array_filter(['q' => $search, 'filter' => 'unread']))) ?>" <?= $filter === 'unread' ? 'aria-current="page"' : '' ?>>Unread<?php if ($unreadTotal): ?> <span class="count"><?= $unreadTotal ?></span><?php endif; ?></a>
+      </nav>
+    </div>
 
-<section class="card card--flush">
-  <nav class="tabs" style="padding:0 12px" aria-label="Message filters">
-    <?php foreach ($tabs as $k => $label): ?>
-      <a href="<?= e(url('admin/messages.php', ['tab' => $k])) ?>" <?= $tab === $k ? 'aria-current="page"' : '' ?>><?= e($label) ?> <span class="count"><?= $counts[$k] ?></span></a>
-    <?php endforeach; ?>
-  </nav>
+    <?php if ($conversations): ?>
+      <ul class="conv-list" id="conv-list">
+        <?php foreach ($conversations as $c): $open = $member && (int)$member['id'] === (int)$c['id']; ?>
+          <li data-filter-text="<?= e(mb_strtolower($c['name'] . ' ' . $c['username'])) ?>">
+            <a class="conv <?= (int)$c['unread'] ? 'is-unread' : '' ?>" href="<?= e($listUrl(['member' => $c['id']])) ?>" <?= $open ? 'aria-current="true"' : '' ?>>
+              <span class="avatar"><?= e(initials($c['name'])) ?></span>
+              <span class="conv__body">
+                <span class="conv__row">
+                  <span class="conv__name"><?= e($c['name']) ?></span>
+                  <time class="conv__time" datetime="<?= e(date('c', strtotime($c['created_at']))) ?>"><?= e(chat_short_time($c['created_at'])) ?></time>
+                </span>
+                <span class="conv__row">
+                  <span class="conv__preview"><?= $c['sender'] === 'library' ? '<span class="conv__you">You: </span>' : '' ?><?= e(mb_strimwidth(preg_replace('/\s+/', ' ', $c['body']), 0, 90, '…')) ?></span>
+                  <?php if ((int)$c['unread']): ?><span class="conv__badge" aria-label="<?= (int)$c['unread'] ?> unread"><?= (int)$c['unread'] ?></span><?php endif; ?>
+                </span>
+                <span class="conv__user">@<?= e($c['username']) ?><?= (int)$c['is_active'] ? '' : ', deactivated' ?></span>
+              </span>
+            </a>
+          </li>
+        <?php endforeach; ?>
+      </ul>
+      <p class="inbox__nomatch small muted" data-filter-empty hidden>No members match your search.</p>
+    <?php else: ?>
+      <div class="empty empty--compact">
+        <?= icon('inbox') ?>
+        <p><?= $search !== '' ? 'No conversations match “' . e($search) . '”.' : ($filter === 'unread' ? 'You\'re all caught up. No unread messages.' : 'No conversations yet. When members write to the library, they appear here.') ?></p>
+      </div>
+    <?php endif; ?>
+  </aside>
 
-  <?php if ($messages): ?>
-    <?php foreach ($messages as $m): ?>
-      <article class="message-item <?= (int)$m['is_read'] ? '' : 'is-unread' ?>">
-        <span class="avatar"><?= e(initials($m['member_name'])) ?></span>
-        <div class="message-item__body">
-          <div class="row row--wrap" style="gap:8px">
-            <span class="message-item__subject"><?= e($m['subject']) ?></span>
-            <span class="spacer"></span>
-            <span class="small muted"><?= e($m['member_name']) ?> · <?= e(time_ago($m['created_at'])) ?></span>
-          </div>
-          <div class="thread">
-            <div class="bubble"><p><?= nl2br(e($m['body'])) ?></p></div>
-            <?php if ($m['reply'] !== null): ?>
-              <div class="bubble bubble--reply">
-                <div class="bubble__meta"><strong>Your reply</strong><span>·</span><span><?= e(time_ago($m['replied_at'])) ?></span><?= (int)$m['reply_seen'] ? '<span>· Seen</span>' : '' ?></div>
-                <p><?= nl2br(e($m['reply'])) ?></p>
-              </div>
-            <?php endif; ?>
-          </div>
-          <details <?= $m['reply'] === null && !(int)$m['is_read'] ? 'open' : '' ?>>
-            <summary class="small link" style="cursor:pointer;width:max-content"><?= $m['reply'] === null ? 'Reply' : 'Edit reply' ?></summary>
-            <form method="post" class="stack" style="gap:10px;margin-top:10px;max-width:640px">
-              <?= csrf_field() ?><input type="hidden" name="action" value="reply"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>">
-              <label class="sr-only" for="reply-<?= (int)$m['id'] ?>">Reply to <?= e($m['member_name']) ?></label>
-              <textarea class="textarea" id="reply-<?= (int)$m['id'] ?>" name="reply" rows="3" maxlength="4000" required placeholder="Write a reply to <?= e($m['member_name']) ?>…"><?= e($m['reply'] ?? '') ?></textarea>
-              <div><button class="btn btn--sm" type="submit"><?= icon('send') ?> Send reply</button></div>
-            </form>
-          </details>
-          <div class="row" style="gap:6px">
-            <form method="post"><?= csrf_field() ?><input type="hidden" name="action" value="read"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>">
-              <button class="btn btn--ghost btn--sm" type="submit"><?= (int)$m['is_read'] ? 'Mark as unread' : 'Mark as read' ?></button></form>
-            <form method="post" data-confirm="This message and any reply will be permanently deleted." data-confirm-title="Delete message?" data-confirm-ok="Delete">
-              <?= csrf_field() ?><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>">
-              <button class="btn btn--ghost btn--sm" type="submit"><?= icon('trash') ?> Delete</button></form>
-          </div>
+  <div class="inbox__chat">
+    <?php if ($member):
+        $mine = 'library';
+        $memberId = (int)$member['id'];
+        $backUrl = $listUrl();
+        $badges = [];
+        if ($overdueCount) $badges[] = '<span class="badge badge--danger">' . $overdueCount . ' overdue</span>';
+        if ($loanCount) $badges[] = '<span class="badge badge--info">' . plural($loanCount, 'book') . ' on loan</span>';
+        if (!(int)$member['is_active']) $badges[] = '<span class="badge badge--muted">Deactivated</span>';
+        $chatHead = '<span class="chat__avatar avatar">' . e(initials($member['name'])) . '</span>'
+            . '<div class="chat__who"><strong>' . e($member['name']) . '</strong>'
+            . '<span>@' . e($member['username']) . ($member['email'] ? ', ' . e($member['email']) : '') . '</span></div>'
+            . '<div class="chat__badges">' . implode('', $badges) . '</div>'
+            . '<a class="btn btn--ghost btn--sm chat__action" href="' . e(url('admin/loans.php', ['q' => $member['username'], 'tab' => 'active'])) . '">' . icon('swap') . ' Loans</a>';
+        $emptyHint = 'No messages with ' . $member['name'] . ' yet. Write the first one below.';
+        $quick = [
+            'Your book is ready to pick up at the desk.',
+            'Thanks for letting us know. We\'ll look into it.',
+            'Friendly reminder: your book is overdue. Please return it soon.',
+        ];
+        include __DIR__ . '/../includes/partials/chat_view.php';
+    else: ?>
+      <div class="chat chat--placeholder">
+        <div class="empty">
+          <?= empty_art('chat') ?>
+          <h3>Choose a conversation</h3>
+          <p><?= $unreadTotal ? plural($unreadTotal, 'member') . ' waiting for a reply.' : 'Pick a member on the left, or start a new conversation.' ?></p>
         </div>
-      </article>
-    <?php endforeach; ?>
-    <?= pagination_links($p) ?>
-  <?php else: ?>
-    <div class="empty"><?= icon('inbox') ?><h3><?= $tab === 'all' ? 'No messages yet' : 'Inbox zero' ?></h3><p><?= $tab === 'all' ? 'When members send questions or requests, they\'ll appear here.' : 'Nothing waiting in this view.' ?></p></div>
-  <?php endif; ?>
-</section>
+      </div>
+    <?php endif; ?>
+  </div>
+</div>
+
+<dialog class="modal modal--sm" id="new-chat" aria-labelledby="new-chat-h">
+  <form method="get" action="<?= e(url('admin/messages.php')) ?>">
+    <div class="modal__head"><h2 id="new-chat-h">New conversation</h2><button class="btn btn--ghost btn--icon btn--sm" type="button" data-close aria-label="Close"><?= icon('x') ?></button></div>
+    <div class="modal__body">
+      <div class="field">
+        <label for="new-chat-member">Member</label>
+        <select class="select" id="new-chat-member" name="member" required>
+          <option value="">Choose a member…</option>
+          <?php foreach ($startable as $m): ?><option value="<?= (int)$m['id'] ?>"><?= e($m['name']) ?> (@<?= e($m['username']) ?>)</option><?php endforeach; ?>
+          <?php if ($conversations): ?>
+            <optgroup label="Already chatting">
+              <?php foreach ($conversations as $c): ?><option value="<?= (int)$c['id'] ?>"><?= e($c['name']) ?> (@<?= e($c['username']) ?>)</option><?php endforeach; ?>
+            </optgroup>
+          <?php endif; ?>
+        </select>
+      </div>
+    </div>
+    <div class="modal__foot"><button class="btn btn--ghost" type="button" data-close>Cancel</button><button class="btn" type="submit">Open chat</button></div>
+  </form>
+</dialog>
 <?php require __DIR__ . '/../includes/partials/footer.php'; ?>

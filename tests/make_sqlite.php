@@ -22,9 +22,8 @@ CREATE TABLE loans (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NU
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE favorites (user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (user_id, book_id));
-CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, subject TEXT NOT NULL,
-  body TEXT NOT NULL, reply TEXT, replied_at TEXT, is_read INTEGER NOT NULL DEFAULT 0, reply_seen INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, member_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  sender TEXT NOT NULL CHECK (sender IN ('member','library')), sender_user_id INTEGER, body TEXT NOT NULL, created_at TEXT NOT NULL, read_at TEXT);
 CREATE TABLE activity_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, actor TEXT NOT NULL, action TEXT NOT NULL, details TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE login_attempts (username TEXT NOT NULL, ip TEXT NOT NULL, attempted_at INTEGER NOT NULL);
@@ -37,6 +36,7 @@ $map = [
     '/DATE_ADD\(CURDATE\(\), INTERVAL (\d+) DAY\)/' => "date('now','localtime','+$1 days')",
     '/DATE_SUB\(NOW\(\), INTERVAL (\d+) DAY\)/'     => "datetime('now','localtime','-$1 days')",
     '/DATE_SUB\(NOW\(\), INTERVAL (\d+) HOUR\)/'    => "datetime('now','localtime','-$1 hours')",
+    '/DATE_SUB\(NOW\(\), INTERVAL (\d+) MINUTE\)/'  => "datetime('now','localtime','-$1 minutes')",
 ];
 foreach (preg_split('/;\s*\n/', $sql) as $stmt) {
     $stmt = trim($stmt);

@@ -22,7 +22,7 @@ require __DIR__ . '/includes/partials/header.php';
   </div>
 <?php else: ?>
   <div class="card empty">
-    <?= icon('heart') ?>
+    <?= empty_art('heart') ?>
     <h3>No favorites yet</h3>
     <p>Tap “Add to favorites” on any book to keep it here.</p>
     <a class="btn btn--sm" href="<?= e(url('discover.php')) ?>">Browse the catalogue</a>

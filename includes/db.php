@@ -25,12 +25,13 @@ function db(): PDO
             ? htmlspecialchars($e->getMessage())
             : 'Please try again later.';
         exit('<!doctype html><meta charset="utf-8"><title>Database unavailable</title>'
-            . '<div style="font-family:system-ui;max-width:560px;margin:15vh auto;padding:0 24px;color:#1E2A3A">'
+            . '<body style="margin:0;background:#0E1420;color:#E8ECF2;font-family:system-ui,sans-serif">'
+            . '<div style="max-width:560px;margin:15vh auto;padding:0 24px;line-height:1.55">'
             . '<h1 style="font-weight:600">Can\'t reach the database</h1>'
             . '<p>BookTrack could not connect to MySQL. Make sure MySQL is running in XAMPP, then open '
-            . '<a href="' . htmlspecialchars(url('setup.php')) . '">setup.php</a> to create the database '
+            . '<a style="color:#F5C55A" href="' . htmlspecialchars(url('setup.php')) . '">setup.php</a> to create the database '
             . '(or import <code>database/booktrack.sql</code> in phpMyAdmin).</p>'
-            . '<pre style="white-space:pre-wrap;background:#F3EEE4;padding:12px;border-radius:8px">' . $hint . '</pre></div>');
+            . '<pre style="white-space:pre-wrap;background:#161E2D;border:1px solid #243047;padding:12px;border-radius:10px;color:#B4BDCC">' . $hint . '</pre></div></body>');
     }
 
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);

@@ -38,10 +38,11 @@ try {
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Set up BookTrack</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap">
 <link rel="stylesheet" href="assets/css/app.css">
 </head>
 <body>
-<main style="max-width:560px;margin:12vh auto;padding:0 20px">
+<main class="plain-page">
   <div class="card stack">
     <div class="brand" style="padding:0"><img src="assets/img/logo.png" alt="" width="46"><span class="brand__name">BookTrack setup</span></div>
     <?php if ($error): ?>

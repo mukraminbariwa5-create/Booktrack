@@ -3,6 +3,17 @@ Options -Indexes
 AddDefaultCharset UTF-8
 DirectoryIndex index.php
 
+# Friendly "page not found" for any missing page inside BookTrack
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # Work out the folder BookTrack lives in (e.g. /booktrack-v2), so this works under any folder name
+  RewriteCond %{REQUEST_URI}::$0 ^(/.+)/(.*)::\2$
+  RewriteRule .* - [E=BT_BASE:%1]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule .? %{ENV:BT_BASE}/404.php [L]
+</IfModule>
+
 # Never serve these files directly
 <FilesMatch "^(config\.php|.*\.sql|.*\.sqlite|.*\.md|.*\.log)$">
   Require all denied

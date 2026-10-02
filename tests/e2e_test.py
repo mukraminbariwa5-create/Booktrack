@@ -32,8 +32,23 @@ alice, r = login('alice', 'member123'); check('discover.php' in r.url, 'member s
 admin, r = login('admin', 'admin123'); check('admin/index.php' in r.url, 'librarian signs in → overview')
 r = alice.get(B + '/admin/books.php'); check('admin/books.php' not in r.url, 'member cannot open admin pages')
 r = requests.get(B + '/loans.php'); check('login.php' in r.url, 'guest redirected to sign in')
-r = requests.post(B + '/messages.php', data={'subject': 'x', 'body': 'y'}, cookies=alice.cookies)
+r = requests.post(B + '/api/chat.php', data={'body': 'y'}, cookies=alice.cookies)
 check(r.status_code in (419, 302, 303) or 'expired' in r.text, f'POST without CSRF token rejected ({r.status_code})')
+
+print('1b. Sign-up')
+new = requests.Session()
+r = post(new, '/register.php', {'name': 'Grace Lim', 'username': 'grace', 'email': 'grace@example.com', 'phone': '', 'password': 'password1', 'password_confirm': 'password1'})
+check('discover.php' in r.url, 'new member signs up and lands in the catalogue, signed in')
+g = q("SELECT role, is_active FROM users WHERE username='grace'")
+check(g and g[0]['role'] == 'member' and int(g[0]['is_active']) == 1, 'sign-up creates an active member (never a librarian)')
+r = post(requests.Session(), '/register.php', {'name': 'X', 'username': 'grace', 'email': 'grace@example.com', 'password': 'password1', 'password_confirm': 'password1'})
+check('That username is taken' in r.text and 'already uses this email' in r.text, 'duplicate username and email are refused, each under its field')
+r = post(requests.Session(), '/register.php', {'name': 'Y', 'username': 'yy1', 'email': 'yy@example.com', 'password': 'password1', 'password_confirm': 'different1'})
+check("passwords don&#039;t match" in r.text or "passwords don't match" in r.text, 'mismatched passwords refused')
+r = post(requests.Session(), '/register.php', {'name': 'Bot', 'username': 'bot1', 'email': 'bot@example.com', 'password': 'password1', 'password_confirm': 'password1', 'website': 'spam.example'})
+check(not q("SELECT id FROM users WHERE username='bot1'"), 'bot trap field blocks automated sign-ups')
+r = post(requests.Session(), '/register.php', {'name': 'Role', 'username': 'role1', 'email': 'role@example.com', 'password': 'password1', 'password_confirm': 'password1', 'role': 'admin'})
+check(q("SELECT role FROM users WHERE username='role1'")[0]['role'] == 'member', 'cannot sign up as a librarian by adding role=admin')
 
 print('2. Borrowing rules')
 free = q("SELECT b.id FROM books b WHERE b.copies > (SELECT COUNT(*) FROM loans l WHERE l.book_id=b.id AND l.status IN ('borrowed','return_requested')) AND b.id NOT IN (SELECT book_id FROM loans WHERE user_id=(SELECT id FROM users WHERE username='alice') AND status IN ('borrowed','return_requested')) ORDER BY b.id")
@@ -51,13 +66,14 @@ for f in free[1:]:
 extra = [f['id'] for f in free if not q(f"SELECT 1 x FROM loans WHERE user_id={aid} AND book_id={f['id']} AND status IN ('borrowed','return_requested')")][0]
 r = post(alice, '/book.php?id=%d' % extra, {'action': 'borrow'})
 check(q(f"SELECT COUNT(*) n FROM loans WHERE user_id={aid} AND status IN ('borrowed','return_requested')")[0]['n'] == 3, 'loan limit of 3 enforced')
-over = q("SELECT u.username FROM loans l JOIN users u ON u.id=l.user_id WHERE l.status='borrowed' AND l.due_at < CURDATE() LIMIT 1")
+TODAY = __import__('datetime').date.today().isoformat()  # portable: works on MySQL and the SQLite test copy
+over = q(f"SELECT u.username FROM loans l JOIN users u ON u.id=l.user_id WHERE l.status='borrowed' AND l.due_at < '{TODAY}' LIMIT 1")
 if over:
     ou = over[0]['username']; os_, _ = login(ou, 'member123'); oid = q(f"SELECT id FROM users WHERE username='{ou}'")[0]['id']
     n0 = q(f"SELECT COUNT(*) n FROM loans WHERE user_id={oid}")[0]['n']
     post(os_, '/book.php?id=%d' % extra, {'action': 'borrow'})
     check(q(f"SELECT COUNT(*) n FROM loans WHERE user_id={oid}")[0]['n'] == n0, f'member with an overdue book ({ou}) is blocked')
-    ol = q(f"SELECT id FROM loans WHERE user_id={oid} AND status='borrowed' AND due_at < CURDATE() LIMIT 1")[0]['id']
+    ol = q(f"SELECT id FROM loans WHERE user_id={oid} AND status='borrowed' AND due_at < '{TODAY}' LIMIT 1")[0]['id']
     post(os_, '/loans.php', {'action': 'renew', 'loan_id': ol})
     check(q(f"SELECT renewals FROM loans WHERE id={ol}")[0]['renewals'] == 0, 'overdue loan cannot be renewed')
 
@@ -83,12 +99,15 @@ r = alice.post(B + '/api/favorite.php', data={'book_id': b1}, headers={'X-CSRF-T
 check(r.ok and r.json().get('ok') and r.json().get('favorite') is True, 'favorite toggled on via API')
 r = alice.post(B + '/api/favorite.php', data={'book_id': b1}, headers={'Accept': 'application/json'})
 check(r.status_code == 419, 'API rejects missing CSRF token')
-post(alice, '/messages.php', {'subject': 'Hello <script>alert(1)</script>', 'body': 'Do you have more copies of Atomic Habits?'})
-mid = q("SELECT id FROM messages ORDER BY id DESC LIMIT 1")[0]['id']
-r = admin.get(B + '/admin/messages.php'); check('<script>alert(1)</script>' not in r.text, 'message subject is escaped (no XSS)')
-post(admin, '/admin/messages.php', {'action': 'reply', 'id': mid, 'reply': 'Yes, two more arrive next week.'})
-check(q(f"SELECT reply FROM messages WHERE id={mid}")[0]['reply'] is not None, 'librarian replied')
+post(alice, '/api/chat.php', {'body': 'Hello <script>alert(1)</script> Do you have more copies of Atomic Habits?'}, page='/messages.php')
+mid = q("SELECT id, member_id FROM chat_messages ORDER BY id DESC LIMIT 1")[0]
+check(mid['member_id'] == aid, 'member message lands in their own conversation')
+r = admin.get(B + f"/admin/messages.php?member={aid}"); check('<script>alert(1)</script>' not in r.text, 'chat message is escaped (no XSS)')
+post(admin, '/api/chat.php', {'member_id': aid, 'body': 'Yes, two more arrive next week.'}, page='/admin/messages.php')
+check(q(f"SELECT COUNT(*) n FROM chat_messages WHERE member_id={aid} AND sender='library'")[0]['n'] >= 1, 'librarian replied')
 r = alice.get(B + '/messages.php'); check('two more arrive next week' in r.text, 'member sees the reply')
+post(alice, '/api/chat.php', {'member_id': 3, 'body': 'not yours'}, page='/messages.php')
+check(not q("SELECT id FROM chat_messages WHERE member_id=3 AND body='not yours'"), "member cannot post into someone else's conversation")
 
 print('5. Books admin, uploads, private PDFs')
 png = (ROOT / 'assets/img/logo.png').read_bytes()

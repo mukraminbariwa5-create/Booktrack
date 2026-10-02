@@ -28,10 +28,23 @@ foreach (q_all('SELECT borrowed_at FROM loans WHERE borrowed_at >= ?', [$from]) 
 }
 $maxMonth = max(1, max($months));
 
+// Circulation health, last 90 days (computed in PHP so it works on any database)
+$since = date('Y-m-d', strtotime('-90 days'));
+$returned = q_all("SELECT borrowed_at, due_at, returned_at FROM loans WHERE status = 'returned' AND returned_at >= ?", [$since]);
+$onTime = count(array_filter($returned, fn($r) => $r['returned_at'] <= $r['due_at']));
+$health = [
+    'this_month' => end($months),
+    'last_month' => prev($months),
+    'on_time_pct' => $returned ? (int)round($onTime / count($returned) * 100) : null,
+    'avg_days' => $returned ? (int)round(array_sum(array_map(fn($r) => (strtotime($r['returned_at']) - strtotime($r['borrowed_at'])) / 86400, $returned)) / count($returned)) : null,
+    'returned' => count($returned),
+];
+$diff = $health['this_month'] - $health['last_month'];
+
 $popular = q_all('SELECT b.id, b.title, b.author, b.cover, COUNT(l.id) AS n FROM loans l JOIN books b ON b.id = l.book_id
                   GROUP BY b.id, b.title, b.author, b.cover ORDER BY n DESC, b.title LIMIT 5');
 $activity = q_all('SELECT * FROM activity_log ORDER BY created_at DESC, id DESC LIMIT 7');
-$unread = (int)q_val('SELECT COUNT(*) FROM messages WHERE is_read = 0');
+$unread = chat_unread_conversations();
 
 $title = 'Overview';
 $active = 'overview';
@@ -39,11 +52,10 @@ require __DIR__ . '/../includes/partials/header.php';
 ?>
 <header class="page-head">
   <div class="page-head__title">
-    <span class="eyebrow"><?= e(date('l, j F Y')) ?></span>
     <h1>Library overview</h1>
+    <p><?= e(date('l, j F Y')) ?></p>
   </div>
   <div class="row row--wrap">
-    <a class="btn btn--ghost" href="<?= e(url('admin/books.php', ['new' => 1])) ?>"><?= icon('plus') ?> Add book</a>
     <a class="btn" href="<?= e(url('admin/loans.php', ['issue' => 1])) ?>"><?= icon('swap') ?> Issue a book</a>
   </div>
 </header>
@@ -71,7 +83,7 @@ require __DIR__ . '/../includes/partials/header.php';
   </a>
 </section>
 
-<div class="grid-2">
+<div class="grid-2 grid-2--stretch">
   <section class="card card--flush" aria-labelledby="attn-h">
     <div class="card__head" style="padding:20px 22px 0">
       <h2 id="attn-h">Needs attention</h2>
@@ -79,14 +91,14 @@ require __DIR__ . '/../includes/partials/header.php';
     </div>
     <?php if ($attention): ?>
     <div class="table-wrap">
-      <table class="table table--compact">
-        <thead><tr><th>Book</th><th>Member</th><th>Status</th><th><span class="sr-only">Action</span></th></tr></thead>
+      <table class="table table--compact table--stack">
+        <thead><tr><th>Book and member</th><th class="hide-sm">Status</th><th><span class="sr-only">Action</span></th></tr></thead>
         <tbody>
         <?php foreach ($attention as $l): ?>
           <tr>
-            <td><div class="cell-book"><?= cover_html($l, 'cover-sm') ?><span><strong><?= e($l['title']) ?></strong><span class="muted small">Due <?= e(fmt_date($l['due_at'], 'j M')) ?></span></span></div></td>
-            <td><?= e($l['member_name']) ?></td>
-            <td><?= $l['status'] === 'return_requested' ? loan_badge($l) : '<span class="badge badge--danger">' . e(due_label($l['due_at'])) . '</span>' ?></td>
+            <?php $badge = $l['status'] === 'return_requested' ? loan_badge($l) : '<span class="badge badge--danger">' . e(due_label($l['due_at'])) . '</span>'; ?>
+            <td><div class="cell-book"><?= cover_html($l, 'cover-sm') ?><span><strong><?= e($l['title']) ?></strong><span class="muted small"><?= e($l['member_name']) ?>, due <?= e(fmt_date($l['due_at'], 'j M')) ?></span><span class="show-sm" style="margin-top:6px"><?= $badge ?></span></span></div></td>
+            <td class="hide-sm"><?= $badge ?></td>
             <td class="num">
               <form method="post" action="<?= e(url('admin/loans.php')) ?>">
                 <?= csrf_field() ?><input type="hidden" name="action" value="return"><input type="hidden" name="loan_id" value="<?= (int)$l['id'] ?>">
@@ -99,22 +111,39 @@ require __DIR__ . '/../includes/partials/header.php';
       </table>
     </div>
     <?php else: ?>
-      <div class="empty"><?= icon('check') ?><h3>All caught up</h3><p>No return requests or overdue books right now.</p></div>
+      <div class="empty"><?= empty_art('done') ?><h3>All caught up</h3><p>No return requests or overdue books right now.</p></div>
     <?php endif; ?>
   </section>
 
-  <section class="card" aria-labelledby="chart-h">
+  <section class="card card--chart" aria-labelledby="chart-h">
     <div class="card__head"><h2 id="chart-h">Loans per month</h2><span class="small muted">Last 6 months</span></div>
     <div class="bars" role="img" aria-label="Loans per month: <?= e(implode(', ', array_map(fn($k, $v) => date('F', strtotime("$k-01")) . " $v", array_keys($months), $months))) ?>">
-      <?php $last = array_key_last($months); foreach ($months as $k => $n): ?>
-        <div class="bars__col <?= $k === $last ? 'is-current' : '' ?>" data-tip="<?= e(date('F Y', strtotime("$k-01")) . ': ' . plural($n, 'loan')) ?>">
+      <?php $last = array_key_last($months); $bi = 0; foreach ($months as $k => $n): ?>
+        <div class="bars__col <?= $k === $last ? 'is-current' : '' ?>" style="--i: <?= $bi++ ?>" data-tip="<?= e(date('F Y', strtotime("$k-01")) . ': ' . plural($n, 'loan')) ?>">
           <span class="bars__value"><?= $n ?></span>
           <span class="bars__bar" style="height: <?= round($n / $maxMonth * 100) ?>%"></span>
           <span class="bars__label"><?= e(date('M', strtotime("$k-01"))) ?></span>
         </div>
       <?php endforeach; ?>
     </div>
-    <details class="small" style="margin-top:12px"><summary class="muted" style="cursor:pointer">View as table</summary>
+    <dl class="mini-stats">
+      <div>
+        <dt>This month so far</dt>
+        <dd><?= plural($health['this_month'], 'loan') ?></dd>
+        <dd class="mini-stats__note <?= $diff > 0 ? 'up' : ($diff < 0 ? 'down' : 'muted') ?>"><?= $diff === 0 ? 'Same as last month' : ($diff > 0 ? '+' : '−') . abs($diff) . ' vs last month' ?></dd>
+      </div>
+      <div>
+        <dt>Returned on time</dt>
+        <dd><?= $health['on_time_pct'] === null ? '—' : $health['on_time_pct'] . '%' ?></dd>
+        <dd class="mini-stats__note muted"><?= $health['returned'] ? 'of ' . plural($health['returned'], 'return') . ', last 90 days' : 'No returns in 90 days' ?></dd>
+      </div>
+      <div>
+        <dt>Average loan</dt>
+        <dd><?= $health['avg_days'] === null ? '—' : plural($health['avg_days'], 'day') ?></dd>
+        <dd class="mini-stats__note muted">Loan period is <?= (int)config('library.loan_days') ?> days</dd>
+      </div>
+    </dl>
+    <details class="chart-table"><summary>View as table</summary>
       <table class="table" style="margin-top:8px"><thead><tr><th>Month</th><th class="num">Loans</th></tr></thead><tbody>
       <?php foreach ($months as $k => $n): ?><tr><td><?= e(date('F Y', strtotime("$k-01"))) ?></td><td class="num"><?= $n ?></td></tr><?php endforeach; ?>
       </tbody></table>
@@ -130,7 +159,7 @@ require __DIR__ . '/../includes/partials/header.php';
       <?php foreach ($activity as $a): ?>
         <div class="list__item">
           <span class="dot <?= activity_dot($a['action']) ?>"></span>
-          <div style="flex:1;min-width:0"><strong><?= e(activity_label($a['action'])) ?></strong> <span class="muted">· <?= e($a['details']) ?></span></div>
+          <div class="list__text"><strong><?= e(activity_label($a['action'])) ?></strong><span class="muted"><?= e($a['details']) ?></span></div>
           <span class="small muted nowrap"><?= e(time_ago($a['created_at'])) ?></span>
         </div>
       <?php endforeach; ?>
@@ -151,7 +180,7 @@ require __DIR__ . '/../includes/partials/header.php';
       <?php endforeach; ?>
     </div>
     <?php if ($unread): ?>
-      <a class="alert alert--warn" href="<?= e(url('admin/messages.php')) ?>" style="margin-top:18px"><?= icon('inbox') ?><span><?= plural($unread, 'unread message') ?> from members</span></a>
+      <a class="alert alert--warn" href="<?= e(url('admin/messages.php')) ?>" style="margin-top:18px"><?= icon('inbox') ?><span><?= plural($unread, 'member') ?> waiting for a reply</span></a>
     <?php endif; ?>
   </section>
 </div>

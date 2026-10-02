@@ -6,7 +6,12 @@ $uid = (int)$user['id'];
 $errors = ['profile' => [], 'password' => []];
 if (is_post()) {
     verify_csrf();
-    if (input('action') === 'profile') {
+    if (input('action') === 'theme') {
+        // fallback for the theme switch when JavaScript is off; it normally switches instantly
+        $t = input('theme') === 'light' ? 'light' : 'dark';
+        setcookie('bt_theme', $t, ['expires' => time() + 31536000, 'path' => '/', 'samesite' => 'Lax']);
+        back('profile.php');
+    } elseif (input('action') === 'profile') {
         $name = input('name');
         $email = input('email');
         $phone = input('phone');
@@ -52,20 +57,36 @@ $v = fn($k) => e(is_post() && input('action') === 'profile' ? input($k) : ($user
     <span class="avatar avatar--lg"><?= e(initials($user['name'])) ?></span>
     <div class="stack" style="gap:2px">
       <h1><?= e($user['name']) ?></h1>
-      <p>@<?= e($user['username']) ?> · <?= $user['role'] === 'admin' ? 'Librarian' : 'Member' ?> since <?= e(fmt_date($user['created_at'], 'F Y')) ?></p>
+      <p>@<?= e($user['username']) ?>, <?= $user['role'] === 'admin' ? 'librarian' : 'member' ?> since <?= e(fmt_date($user['created_at'], 'F Y')) ?></p>
     </div>
   </div>
+  <form class="show-mobile" method="post" action="<?= e(url('logout.php')) ?>">
+    <?= csrf_field() ?>
+    <button class="btn btn--ghost" type="submit"><?= icon('logout') ?> Sign out</button>
+  </form>
 </header>
 
 <?php if ($user['role'] === 'member'): ?>
-<div class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+<div class="stats stats--3">
   <div class="stat"><span class="stat__label">Books borrowed</span><span class="stat__value"><?= $stats['total'] ?></span></div>
   <div class="stat"><span class="stat__label">Returned</span><span class="stat__value"><?= $stats['returned'] ?></span></div>
   <div class="stat"><span class="stat__label">Favorites</span><span class="stat__value"><?= $stats['favorites'] ?></span></div>
 </div>
 <?php endif; ?>
 
-<div class="grid-2" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+<section class="card appearance">
+  <div class="appearance__text">
+    <h2>Appearance</h2>
+    <p class="small muted">Night Shelf is easy on the eyes after dark; Day Shelf reads better in bright rooms. Saved on this device.</p>
+  </div>
+  <form method="post" class="segmented" role="group" aria-label="Theme">
+    <?= csrf_field() ?><input type="hidden" name="action" value="theme">
+    <button type="submit" name="theme" value="dark" data-theme-set="dark" aria-pressed="<?= $theme === 'dark' ? 'true' : 'false' ?>"><?= icon('moon') ?> Night</button>
+    <button type="submit" name="theme" value="light" data-theme-set="light" aria-pressed="<?= $theme === 'light' ? 'true' : 'false' ?>"><?= icon('sun') ?> Day</button>
+  </form>
+</section>
+
+<div class="grid-2 grid-2--even">
   <form class="card stack" method="post">
     <?= csrf_field() ?><input type="hidden" name="action" value="profile">
     <div class="card__head" style="margin:0"><h2>Personal details</h2></div>

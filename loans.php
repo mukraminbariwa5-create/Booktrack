@@ -9,7 +9,11 @@ if (is_post()) {
         $loanId = input_int('loan_id');
         if (input('action') === 'return') {
             request_return($loanId, $uid);
-            flash('success', 'Return requested. Drop the book at the desk and the librarian will check it in.');
+            flash('success', 'Return requested. Drop the book at the desk and the librarian will check it in.',
+                ['url' => url('loans.php'), 'fields' => ['action' => 'cancel_return', 'loan_id' => $loanId]]);
+        } elseif (input('action') === 'cancel_return') {
+            cancel_return($loanId, $uid);
+            flash('success', 'Return cancelled. The book stays on your loans.');
         } elseif (input('action') === 'renew') {
             $due = renew_loan($loanId, $uid);
             flash('success', 'Renewed. Your new due date is ' . fmt_date($due) . '.');
@@ -43,7 +47,7 @@ require __DIR__ . '/includes/partials/header.php';
   </div>
 <?php else: ?>
   <div class="card empty">
-    <?= icon('book') ?>
+    <?= empty_art('shelf') ?>
     <h3>No books on loan</h3>
     <p>When you borrow a book it will show up here with its due date.</p>
     <a class="btn btn--sm" href="<?= e(url('discover.php')) ?>">Browse the catalogue</a>
@@ -54,14 +58,14 @@ require __DIR__ . '/includes/partials/header.php';
   <div class="section-title"><h2>Reading history</h2></div>
   <?php if ($history): ?>
   <div class="card card--flush table-wrap">
-    <table class="table">
+    <table class="table table--stack">
       <thead><tr><th>Book</th><th>Borrowed</th><th>Returned</th><th>Status</th></tr></thead>
       <tbody>
       <?php foreach ($history as $h): ?>
         <tr>
           <td><a class="cell-book" href="<?= e(url('book.php', ['id' => $h['book_id']])) ?>"><?= cover_html($h, 'cover-sm') ?><span><strong><?= e($h['title']) ?></strong><span class="muted small"><?= e($h['author']) ?></span></span></a></td>
-          <td class="nowrap"><?= e(fmt_date($h['borrowed_at'])) ?></td>
-          <td class="nowrap"><?= e(fmt_date($h['returned_at'])) ?></td>
+          <td class="nowrap" data-label="Borrowed"><?= e(fmt_date($h['borrowed_at'])) ?></td>
+          <td class="nowrap" data-label="Returned"><?= e(fmt_date($h['returned_at'])) ?></td>
           <td><?= $h['returned_at'] > $h['due_at'] ? '<span class="badge badge--warn">Returned late</span>' : '<span class="badge badge--ok">On time</span>' ?></td>
         </tr>
       <?php endforeach; ?>

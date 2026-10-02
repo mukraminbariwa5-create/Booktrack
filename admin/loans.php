@@ -20,7 +20,7 @@ if (is_post()) {
             $loan = find_loan(input_int('loan_id'));
             if ($loan) {
                 q('DELETE FROM loans WHERE id = ?', [$loan['id']]);
-                log_activity('loan.deleted', "“{$loan['title']}” / {$loan['member_name']}");
+                log_activity('loan.deleted', "Loan record of “{$loan['title']}” for {$loan['member_name']}");
                 flash('success', 'Loan record deleted.');
             }
         }
@@ -84,13 +84,13 @@ require __DIR__ . '/../includes/partials/header.php';
   <form class="toolbar" method="get">
     <input type="hidden" name="tab" value="<?= e($tab) ?>">
     <label class="search" style="flex:1;max-width:420px"><?= icon('search') ?><span class="sr-only">Search loans</span>
-      <input type="search" name="q" value="<?= e($search) ?>" placeholder="Search by book or member"></label>
+      <input type="search" name="q" autocomplete="off" spellcheck="false" value="<?= e($search) ?>" placeholder="Search by book or member"></label>
     <?php if ($search !== ''): ?><a class="btn btn--ghost btn--sm" href="<?= e(url('admin/loans.php', ['tab' => $tab])) ?>">Clear</a><?php endif; ?>
   </form>
 
   <?php if ($loans): ?>
   <div class="table-wrap">
-    <table class="table">
+    <table class="table table--stack">
       <thead><tr><th>Book</th><th>Member</th><th>Borrowed</th><th><?= $tab === 'history' ? 'Returned' : 'Due' ?></th><th>Status</th><th class="num">Actions</th></tr></thead>
       <tbody>
       <?php foreach ($loans as $l): ?>
@@ -100,7 +100,7 @@ require __DIR__ . '/../includes/partials/header.php';
           <td class="nowrap"><?= e(fmt_date($l['borrowed_at'])) ?></td>
           <td class="nowrap">
             <?php if ($tab === 'history'): ?><?= e(fmt_date($l['returned_at'])) ?>
-              <?php if ($l['returned_at'] > $l['due_at']): ?><br><span class="small" style="color:var(--gold-ink)">Late</span><?php endif; ?>
+              <?php if ($l['returned_at'] > $l['due_at']): ?><br><span class="small" style="color:var(--gold-text)">Late</span><?php endif; ?>
             <?php else: ?><?= e(fmt_date($l['due_at'])) ?><br><span class="small <?= loan_state($l) === 'overdue' ? '' : 'muted' ?>" style="<?= loan_state($l) === 'overdue' ? 'color:var(--red)' : '' ?>"><?= e(due_label($l['due_at'])) ?></span><?php endif; ?>
           </td>
           <td><?= loan_badge($l) ?></td>
@@ -123,7 +123,7 @@ require __DIR__ . '/../includes/partials/header.php';
   </div>
   <?= pagination_links($p) ?>
   <?php else: ?>
-    <div class="empty"><?= icon($tab === 'overdue' ? 'check' : 'swap') ?>
+    <div class="empty"><?= empty_art($tab === 'overdue' ? 'done' : 'loans') ?>
       <h3><?= $search !== '' ? 'No matching loans' : ['active' => 'No books on loan', 'requests' => 'No return requests', 'overdue' => 'Nothing overdue', 'history' => 'No returns yet'][$tab] ?></h3>
       <p><?= $tab === 'overdue' ? 'Every loan is within its due date.' : 'Loans will appear here as members borrow and return books.' ?></p></div>
   <?php endif; ?>
@@ -143,7 +143,7 @@ require __DIR__ . '/../includes/partials/header.php';
       <div class="field"><label for="issue-book">Book</label>
         <select class="select" id="issue-book" name="book_id" required>
           <option value="">Choose an available book…</option>
-          <?php foreach ($availableBooks as $b): ?><option value="<?= (int)$b['id'] ?>" <?= input_int('book_id') === (int)$b['id'] ? 'selected' : '' ?>><?= e($b['title']) ?> — <?= e($b['author']) ?> (<?= (int)$b['available'] ?> left)</option><?php endforeach; ?>
+          <?php foreach ($availableBooks as $b): ?><option value="<?= (int)$b['id'] ?>" <?= input_int('book_id') === (int)$b['id'] ? 'selected' : '' ?>><?= e($b['title']) ?>, <?= e($b['author']) ?> (<?= (int)$b['available'] ?> left)</option><?php endforeach; ?>
         </select></div>
       <div class="form-grid">
         <div class="field"><label for="issue-due">Due date</label>

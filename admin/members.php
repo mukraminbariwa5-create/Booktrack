@@ -35,7 +35,7 @@ if (is_post()) {
                 q('UPDATE users SET name = ?, username = ?, email = ?, phone = ?, is_active = ? WHERE id = ?',
                     [$data['name'], $data['username'], $data['email'] ?: null, $data['phone'] ?: null, $data['is_active'], $id]);
                 if ($password !== '') q('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash($password, PASSWORD_DEFAULT), $id]);
-                log_activity('member.updated', $data['name'] . ($password !== '' ? ' (password reset)' : ''));
+                log_activity('member.updated', $data['name'] . ($password !== '' ? ', password reset' : ''));
                 flash('success', $data['name'] . '\'s account was updated.');
             } else {
                 q("INSERT INTO users (name, username, email, phone, password_hash, role, is_active, created_at) VALUES (?, ?, ?, ?, ?, 'member', ?, ?)",
@@ -98,7 +98,7 @@ require __DIR__ . '/../includes/partials/header.php';
 <section class="card card--flush">
   <form class="toolbar" method="get">
     <label class="search" style="flex:1;max-width:420px"><?= icon('search') ?><span class="sr-only">Search members</span>
-      <input type="search" name="q" value="<?= e($search) ?>" placeholder="Search name, username or email"></label>
+      <input type="search" name="q" autocomplete="off" spellcheck="false" value="<?= e($search) ?>" placeholder="Search name, username or email"></label>
     <label class="sr-only" for="status">Status</label>
     <select class="select" id="status" name="status" data-autosubmit style="width:auto">
       <option value="">All members</option>
@@ -110,18 +110,19 @@ require __DIR__ . '/../includes/partials/header.php';
 
   <?php if ($members): ?>
   <div class="table-wrap">
-    <table class="table">
-      <thead><tr><th>Member</th><th>Contact</th><th>On loan</th><th class="num">Total loans</th><th>Last sign-in</th><th class="num">Actions</th></tr></thead>
+    <table class="table table--stack">
+      <thead><tr><th>Member</th><th>Contact</th><th>On loan</th><th class="num">Total loans</th><th>Joined</th><th>Last sign-in</th><th class="num">Actions</th></tr></thead>
       <tbody>
       <?php foreach ($members as $m): ?>
         <tr>
-          <td><div class="cell-person"><span class="avatar" style="<?= (int)$m['is_active'] ? '' : 'background:var(--border-strong)' ?>"><?= e(initials($m['name'])) ?></span>
-            <span><strong><?= e($m['name']) ?></strong><?= (int)$m['is_active'] ? '' : ' <span class="badge badge--muted badge--plain">Deactivated</span>' ?><br><span class="small muted">@<?= e($m['username']) ?> · joined <?= e(fmt_date($m['created_at'], 'M Y')) ?></span></span></div></td>
+          <td><div class="cell-person"><span class="avatar" style="<?= (int)$m['is_active'] ? '' : 'opacity:.45' ?>"><?= e(initials($m['name'])) ?></span>
+            <span><strong><?= e($m['name']) ?></strong><?= (int)$m['is_active'] ? '' : ' <span class="badge badge--muted badge--plain">Deactivated</span>' ?><br><span class="small muted">@<?= e($m['username']) ?></span></span></div></td>
           <td class="small"><?= e($m['email'] ?: '—') ?><br><span class="muted"><?= e($m['phone'] ?: '') ?></span></td>
           <td><?php if ((int)$m['overdue']): ?><span class="badge badge--danger"><?= (int)$m['overdue'] ?> overdue</span>
               <?php elseif ((int)$m['active_loans']): ?><span class="badge badge--info"><?= plural((int)$m['active_loans'], 'book') ?></span>
               <?php else: ?><span class="muted">—</span><?php endif; ?></td>
           <td class="num"><?= (int)$m['total_loans'] ?></td>
+          <td class="small nowrap"><?= e(fmt_date($m['created_at'], 'j M Y')) ?></td>
           <td class="small muted nowrap"><?= $m['last_login_at'] ? e(time_ago($m['last_login_at'])) : 'Never' ?></td>
           <td>
             <div class="actions">
@@ -140,7 +141,7 @@ require __DIR__ . '/../includes/partials/header.php';
   </div>
   <?= pagination_links($p) ?>
   <?php else: ?>
-    <div class="empty"><?= icon('users') ?><h3>No members found</h3><p>Try a different search, or add a new member.</p></div>
+    <div class="empty"><?= empty_art('members') ?><h3>No members found</h3><p>Try a different search, or add a new member.</p></div>
   <?php endif; ?>
 </section>
 

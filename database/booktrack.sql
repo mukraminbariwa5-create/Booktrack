@@ -9,7 +9,7 @@ CREATE DATABASE IF NOT EXISTS `booktrack_v2` DEFAULT CHARACTER SET utf8mb4 COLLA
 USE `booktrack_v2`;
 
 SET FOREIGN_KEY_CHECKS = 0;
-DROP TABLE IF EXISTS login_attempts, activity_log, messages, favorites, loans, books, users;
+DROP TABLE IF EXISTS login_attempts, activity_log, chat_messages, messages, favorites, loans, books, users;
 SET FOREIGN_KEY_CHECKS = 1;
 
 CREATE TABLE users (
@@ -69,19 +69,19 @@ CREATE TABLE favorites (
   CONSTRAINT fk_fav_book FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE messages (
-  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id    INT UNSIGNED NOT NULL,
-  subject    VARCHAR(160) NOT NULL,
-  body       TEXT NOT NULL,
-  reply      TEXT NULL,
-  replied_at DATETIME NULL,
-  is_read    TINYINT(1) NOT NULL DEFAULT 0,
-  reply_seen TINYINT(1) NOT NULL DEFAULT 0,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT fk_msg_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  INDEX idx_msg_read (is_read),
-  INDEX idx_msg_user (user_id)
+-- One ongoing conversation per member with the library (Messenger-style).
+-- sender: who wrote it; read_at: when the other side opened the conversation.
+CREATE TABLE chat_messages (
+  id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  member_id      INT UNSIGNED NOT NULL,
+  sender         ENUM('member','library') NOT NULL,
+  sender_user_id INT UNSIGNED NULL,
+  body           TEXT NOT NULL,
+  created_at     DATETIME NOT NULL,
+  read_at        DATETIME NULL,
+  CONSTRAINT fk_chat_member FOREIGN KEY (member_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_chat_member (member_id, id),
+  INDEX idx_chat_unread (sender, read_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE activity_log (
@@ -107,7 +107,7 @@ CREATE TABLE login_attempts (
 --  Demo data
 -- ------------------------------------------------------------
 
--- admin / admin123   ·   members: member123
+-- admin / admin123, members: member123
 INSERT INTO users (id, name, username, email, phone, password_hash, role, created_at) VALUES
 (1, 'Library Admin', 'admin', 'admin@booktrack.local', NULL, '$2y$12$eb/gL3Fs1.a/zHtbc4TcvuyYM57ZLZpQYWPLpr7sgP/aTDb723Ppy', 'admin', DATE_SUB(NOW(), INTERVAL 200 DAY)),
 (2, 'Alice Santos', 'alice', 'alice@example.com', '0917 555 0101', '$2y$12$8HEhIA.lu2Xh04/0A9TGiuZE4rCJPcq5YO07/43bXmEvinGqG8RGa', 'member', DATE_SUB(NOW(), INTERVAL 180 DAY)),
@@ -159,13 +159,18 @@ INSERT INTO loans (user_id, book_id, borrowed_at, due_at, returned_at, renewals,
 
 INSERT INTO favorites (user_id, book_id) VALUES (2, 6), (2, 8), (2, 11), (2, 15), (3, 9), (4, 14);
 
-INSERT INTO messages (user_id, subject, body, reply, replied_at, is_read, reply_seen, created_at) VALUES
-(2, 'Request: more copies of Atomic Habits', 'Hi! Atomic Habits always seems to be on loan. Could the library get another copy?', 'Thanks for the suggestion, Alice — we''ve ordered a third copy and it''s now on the shelf.', DATE_SUB(NOW(), INTERVAL 2 DAY), 1, 0, DATE_SUB(NOW(), INTERVAL 4 DAY)),
-(3, 'Damaged page in Rich Dad Poor Dad', 'Just a heads-up that pages 40–42 in my copy are torn. It was like that when I borrowed it.', NULL, NULL, 0, 0, DATE_SUB(NOW(), INTERVAL 1 DAY)),
-(6, 'Extending my loan', 'Is it possible to keep Deep Work for one more week? I''m nearly done.', NULL, NULL, 0, 0, DATE_SUB(NOW(), INTERVAL 5 HOUR));
+INSERT INTO chat_messages (member_id, sender, sender_user_id, body, created_at, read_at) VALUES
+(4, 'member',  4, 'Hi! Do you have any books by José Rizal?', DATE_SUB(NOW(), INTERVAL 30 DAY), DATE_SUB(NOW(), INTERVAL 30 DAY)),
+(4, 'library', 1, 'Yes! Noli Me Tángere is in the Fiction section. We have 3 copies, so you can borrow one any time.', DATE_SUB(NOW(), INTERVAL 30 DAY), DATE_SUB(NOW(), INTERVAL 29 DAY)),
+(4, 'member',  4, 'Thank you!', DATE_SUB(NOW(), INTERVAL 29 DAY), DATE_SUB(NOW(), INTERVAL 29 DAY)),
+(2, 'member',  2, 'Hi! Atomic Habits always seems to be on loan. Could the library get another copy?', DATE_SUB(NOW(), INTERVAL 4 DAY), DATE_SUB(NOW(), INTERVAL 3 DAY)),
+(2, 'library', 1, 'Thanks for the suggestion, Alice. We ordered a third copy and it is now on the shelf.', DATE_SUB(NOW(), INTERVAL 2 DAY), NULL),
+(3, 'member',  3, 'Just a heads-up: pages 40 to 42 in my copy of Rich Dad Poor Dad are torn. It was like that when I borrowed it.', DATE_SUB(NOW(), INTERVAL 1 DAY), NULL),
+(6, 'member',  6, 'Hi! Is it possible to keep Deep Work for one more week?', DATE_SUB(NOW(), INTERVAL 5 HOUR), NULL),
+(6, 'member',  6, 'I am nearly done, just need a few more days for my school report.', DATE_SUB(NOW(), INTERVAL 299 MINUTE), NULL);
 
 INSERT INTO activity_log (user_id, actor, action, details, created_at) VALUES
 (1, 'admin', 'book.created', '“Nineteen Eighty-Four”', DATE_SUB(NOW(), INTERVAL 10 DAY)),
-(5, 'diego', 'loan.created', '“Atomic Habits” → Diego Navarro', DATE_SUB(NOW(), INTERVAL 3 DAY)),
-(1, 'admin', 'message.replied', 'Request: more copies of Atomic Habits', DATE_SUB(NOW(), INTERVAL 2 DAY)),
-(4, 'carla', 'loan.return_requested', '“Sapiens” by Carla Reyes', DATE_SUB(NOW(), INTERVAL 6 HOUR));
+(5, 'diego', 'loan.created', 'Diego Navarro borrowed “Atomic Habits”', DATE_SUB(NOW(), INTERVAL 3 DAY)),
+(1, 'admin', 'message.replied', 'To Alice Santos: Thanks for the suggestion, Alice. We ordered a third copy…', DATE_SUB(NOW(), INTERVAL 2 DAY)),
+(4, 'carla', 'loan.return_requested', 'Carla Reyes asked to return “Sapiens”', DATE_SUB(NOW(), INTERVAL 6 HOUR));

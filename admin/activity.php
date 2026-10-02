@@ -29,7 +29,7 @@ require __DIR__ . '/../includes/partials/header.php';
   </nav>
   <?php if ($rows): ?>
   <div class="table-wrap">
-    <table class="table">
+    <table class="table table--stack">
       <thead><tr><th>When</th><th>Event</th><th>Details</th><th>By</th></tr></thead>
       <tbody>
       <?php foreach ($rows as $r): ?>
@@ -45,7 +45,7 @@ require __DIR__ . '/../includes/partials/header.php';
   </div>
   <?= pagination_links($p) ?>
   <?php else: ?>
-    <div class="empty"><?= icon('activity') ?><h3>Nothing logged yet</h3></div>
+    <div class="empty"><?= empty_art('activity') ?><h3>Nothing logged yet</h3></div>
   <?php endif; ?>
 </section>
 <?php require __DIR__ . '/../includes/partials/footer.php'; ?>
