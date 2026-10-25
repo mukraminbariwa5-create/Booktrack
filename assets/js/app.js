@@ -73,6 +73,115 @@
       toggleFavorite(form, true);
     }));
 
+    // ---- desk: scan a library card's QR code with the camera, where the browser can read QR codes
+    const scanBtn = $('[data-scan]');
+    const scanDlg = $('#scan-dialog');
+    if (scanBtn && scanDlg && 'BarcodeDetector' in window && navigator.mediaDevices) {
+      BarcodeDetector.getSupportedFormats().then((formats) => {
+        if (!formats.includes('qr_code')) return;
+        scanBtn.hidden = false;
+        const video = $('video', scanDlg);
+        const status = $('[data-scan-status]', scanDlg);
+        const input = $('[data-desk-input]');
+        let stream = null; let timer = 0;
+        const stop = () => { clearTimeout(timer); if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; };
+        scanDlg.addEventListener('close', stop);
+        scanBtn.addEventListener('click', async () => {
+          scanDlg.showModal();
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+            video.srcObject = stream;
+            await video.play();
+          } catch (e) {
+            status.textContent = 'The camera isn\'t available. Allow camera access, or type the card number instead.';
+            return;
+          }
+          const detector = new BarcodeDetector({ formats: ['qr_code'] });
+          const tick = async () => {
+            if (!stream) return;
+            try {
+              const codes = await detector.detect(video);
+              const hit = codes.find((c) => /^\s*BT-?\d+\s*$/i.test(c.rawValue));
+              if (hit) {
+                status.textContent = 'Found ' + hit.rawValue.trim() + '…';
+                input.value = hit.rawValue.trim();
+                stop();
+                input.form.submit();
+                return;
+              }
+            } catch (e) { /* keep trying */ }
+            timer = setTimeout(tick, 200);
+          };
+          tick();
+        });
+      }).catch(() => {});
+    }
+
+    // ---- reviews: tapping a star in "Rate this book" opens the sheet with that rating chosen
+    const reviewDlg = $('#review-dialog');
+    const RATE_WORDS = ['', 'Didn\'t like it', 'It was OK', 'Liked it', 'Really liked it', 'Loved it'];
+    const syncWord = (scope) => {
+      const picked = $('input[name="rating"]:checked', scope);
+      const word = $('[data-rate-word]', scope);
+      if (word) word.textContent = picked ? RATE_WORDS[+picked.value] : '';
+    };
+    $$('.rate').forEach((fs) => { fs.addEventListener('change', () => syncWord(fs)); syncWord(fs); });
+    if (reviewDlg) {
+      $$('[data-rate-start] button[name="rating"]').forEach((b) => b.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const radio = $('input[name="rating"][value="' + b.value + '"]', reviewDlg);
+        if (radio) radio.checked = true;
+        syncWord(reviewDlg);
+        reviewDlg.showModal();
+        const text = $('textarea', reviewDlg);
+        if (text) text.focus();
+      }));
+    }
+
+    // ---- copy a value (the library card number, recovery codes) to the clipboard
+    if (navigator.clipboard) $$('[data-copy]').forEach((b) => {
+      b.hidden = false;
+      b.addEventListener('click', async () => {
+        const label = $('[data-copy-label]', b);
+        const original = label.dataset.original || (label.dataset.original = label.textContent);
+        try { await navigator.clipboard.writeText(b.dataset.copy); label.textContent = 'Copied'; }
+        catch (e) { label.textContent = 'Couldn\'t copy'; }
+        setTimeout(() => { label.textContent = original; }, 1800);
+      });
+    });
+
+    // ---- a scrolling chip row starts at the chosen chip, so the active filter is visible
+    $$('.chips--scroll').forEach((row) => {
+      const cur = $('[aria-current="true"]', row);
+      if (cur && row.scrollWidth > row.clientWidth) row.scrollLeft = Math.max(0, cur.offsetLeft - row.offsetLeft - 16);
+    });
+
+    // ---- long reviews show four lines with "Read more"
+    $$('[data-clamp-lines]').forEach((p) => {
+      p.classList.add('is-clamped');
+      if (p.scrollHeight - p.clientHeight < 4) { p.classList.remove('is-clamped'); return; }
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'review__more';
+      more.textContent = 'Read more';
+      more.setAttribute('aria-expanded', 'false');
+      more.addEventListener('click', () => {
+        const open = p.classList.toggle('is-clamped') === false;
+        more.textContent = open ? 'Show less' : 'Read more';
+        more.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      p.after(more);
+    });
+
+    // ---- small <details> menus close when you click elsewhere or press Esc
+    document.addEventListener('click', (ev) => {
+      $$('details.cal-menu[open]').forEach((d) => { if (!d.contains(ev.target)) d.open = false; });
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Escape') return;
+      $$('details.cal-menu[open]').forEach((d) => { d.open = false; d.querySelector('summary').focus(); });
+    });
+
     // ---- auto-submit filters (selects with data-autosubmit)
     $$('[data-autosubmit]').forEach((el) => el.addEventListener('change', () => el.form && el.form.submit()));
 
@@ -367,8 +476,10 @@
       setTimeout(() => { el.remove(); if (el._onGone) el._onGone(); }, REDUCED ? 0 : 250);
     };
     el._close = close;
-    el.style.setProperty('--life', ms + 'ms');
     $('.flash__close', el)?.addEventListener('click', close);
+    // errors stay until dismissed, so a refused action is never missed
+    if (el.hasAttribute('data-sticky')) return;
+    el.style.setProperty('--life', ms + 'ms');
     el.addEventListener('animationend', (ev) => { if (ev.animationName === 'flash-life') close(); });
     if (REDUCED) setTimeout(close, ms);
   }
@@ -562,9 +673,9 @@
     if (reduced) return;
 
     if (finePointer) {
-      // ---- covers tilt toward the pointer
-      $$('.book-card__cover, [data-tilt]').forEach((el) => {
-        const max = el.hasAttribute('data-tilt') ? 7 : 10;
+      // ---- the big cover on a book page tilts toward the pointer (grid covers stay still)
+      $$('[data-tilt]').forEach((el) => {
+        const max = 7;
         let frame = 0;
         el.addEventListener('pointermove', (ev) => {
           const r = el.getBoundingClientRect();
@@ -586,13 +697,6 @@
           el.style.removeProperty('--ry');
         });
       });
-
-      // ---- soft light that follows the pointer across cards
-      $$('.stat, .loan-card').forEach((el) => el.addEventListener('pointermove', (ev) => {
-        const r = el.getBoundingClientRect();
-        el.style.setProperty('--mx', (ev.clientX - r.left) + 'px');
-        el.style.setProperty('--my', (ev.clientY - r.top) + 'px');
-      }));
 
       // ---- the sign-in cover wall drifts slightly against the pointer
       const wallBox = document.querySelector('.auth__wall');
@@ -758,7 +862,7 @@
       root.dataset.theme = theme;
       document.cookie = 'bt_theme=' + theme + '; path=/; max-age=31536000; samesite=lax';
       const meta = document.querySelector('meta[name="theme-color"]');
-      if (meta) meta.content = theme === 'light' ? '#F6F3EC' : '#0E1420';
+      if (meta) meta.content = theme === 'light' ? '#EDF0F4' : '#0E1420';
       const scheme = document.querySelector('meta[name="color-scheme"]');
       if (scheme) scheme.content = theme;
       document.querySelectorAll('[data-theme-set]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.themeSet === theme ? 'true' : 'false'));
@@ -858,7 +962,7 @@
           const side = document.createElement('span');
           side.className = 'palette__side' + (b.available ? '' : ' is-out');
           side.textContent = b.available ? (b.copies > 1 ? b.available + ' of ' + b.copies + ' free' : 'Available') : 'On loan';
-          add(b.cover ? img(b.cover) : colorThumb(b), b.title, [b.author, b.category].filter(Boolean).join(' · '), side, q, () => go(b.url));
+          add(b.cover ? img(b.cover) : colorThumb(b), b.title, [b.author, b.category].filter(Boolean).join(', '), side, q, () => go(b.url));
         });
       }
       if (data.members && data.members.length) {
@@ -867,7 +971,7 @@
           const g = document.createElement('span');
           g.className = 'palette__glyph palette__glyph--avatar';
           g.textContent = m.initials;
-          add(g, m.name, '@' + m.username + (m.active ? '' : ' · deactivated'), null, q, () => go(m.url));
+          add(g, m.name, '@' + m.username + (m.active ? '' : ', deactivated'), null, q, () => go(m.url));
         });
       }
       if (!items.length) {

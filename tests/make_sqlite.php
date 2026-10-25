@@ -27,6 +27,21 @@ CREATE TABLE chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, member_id INTE
 CREATE TABLE activity_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, actor TEXT NOT NULL, action TEXT NOT NULL, details TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE login_attempts (username TEXT NOT NULL, ip TEXT NOT NULL, attempted_at INTEGER NOT NULL);
+CREATE TABLE holds (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT 'waiting'
+  CHECK (status IN ('waiting','ready','fulfilled','cancelled','expired')), created_at TEXT NOT NULL, ready_at TEXT, expires_at TEXT, notified_at TEXT);
+CREATE TABLE reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE, rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5), body TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (user_id, book_id));
+CREATE TABLE reminder_log (loan_id INTEGER NOT NULL REFERENCES loans(id) ON DELETE CASCADE, kind TEXT NOT NULL, sent_at TEXT NOT NULL, PRIMARY KEY (loan_id, kind));
+CREATE TABLE two_factor (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, secret TEXT NOT NULL,
+  last_step INTEGER NOT NULL DEFAULT 0, recovery_codes TEXT NOT NULL, enabled_at TEXT NOT NULL);
+CREATE TABLE password_resets (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NULL UNIQUE, ip TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NULL, used_at TEXT NULL);
+CREATE TABLE fines (id INTEGER PRIMARY KEY AUTOINCREMENT, loan_id INTEGER NULL UNIQUE REFERENCES loans(id) ON DELETE SET NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, book_title TEXT NOT NULL, days_late INTEGER NOT NULL, amount REAL NOT NULL,
+  status TEXT NOT NULL DEFAULT 'unpaid' CHECK (status IN ('unpaid','paid','waived')), created_at TEXT NOT NULL, settled_at TEXT NULL,
+  settled_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL, note TEXT NULL);
 SQL);
 
 $sql = file_get_contents(__DIR__ . '/../database/booktrack.sql');

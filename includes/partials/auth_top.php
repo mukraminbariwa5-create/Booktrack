@@ -20,8 +20,8 @@ $spotlight = array_slice($spotlight, 0, 5);
 <a class="skip-link" href="#auth-main">Skip to form</a>
 <div class="auth">
   <div class="auth__panel">
-    <a class="auth__brand" href="<?= e(url('login.php')) ?>">
-      <img src="<?= e(asset('img/logo.png')) ?>" alt="" width="44" height="26">
+    <a class="auth__brand" href="<?= e(url('index.php')) ?>" title="BookTrack home">
+      <?= logo_mark() ?>
       <span>BookTrack</span>
     </a>
     <button class="btn btn--ghost btn--icon auth__theme" type="button" data-theme-toggle aria-label="Switch to <?= $theme === 'light' ? 'dark' : 'light' ?> theme" title="Switch theme"><?= icon($theme === 'light' ? 'moon' : 'sun') ?></button>

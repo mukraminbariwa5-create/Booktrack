@@ -298,8 +298,12 @@ function icon(string $name, string $class = 'icon'): string
         'share'    => '<circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 13.3l7.4 4.4M15.7 6.3l-7.4 4.4"/>',
         'chevron-right' => '<path d="M9 6l6 6-6 6"/>',
         'clock'    => '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+        'scan'     => '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M8 12h8"/>',
+        'camera'   => '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+        'calendar' => '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
         'alert'    => '<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17.5v.01"/>',
         'file'     => '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 13h6M9 17h6"/>',
+        'download' => '<path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/>',
         'refresh'  => '<path d="M20 11a8 8 0 0 0-14.7-4M4 5v4h4"/><path d="M4 13a8 8 0 0 0 14.7 4M20 19v-4h-4"/>',
         'arrow-left' => '<path d="M19 12H5M11 6l-6 6 6 6"/>',
         'arrow-right' => '<path d="M5 12h14M13 6l6 6-6 6"/>',
@@ -361,6 +365,7 @@ function store_cover(string $field): ?string
 {
     $f = $_FILES[$field] ?? null;
     if (!$f || ($f['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) return null;
+    if (demo_uploads_blocked()) throw new RuntimeException('Uploads are turned off in the public demo. Use "Find online" to add a real cover.');
     if ($f['error'] !== UPLOAD_ERR_OK) throw new RuntimeException('The cover image could not be uploaded.');
     if ($f['size'] > config('uploads.max_cover_mb') * 1024 * 1024) {
         throw new RuntimeException('Cover images must be under ' . config('uploads.max_cover_mb') . ' MB.');
@@ -407,6 +412,7 @@ function store_pdf(string $field): ?string
 {
     $f = $_FILES[$field] ?? null;
     if (!$f || ($f['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) return null;
+    if (demo_uploads_blocked()) throw new RuntimeException('Uploads are turned off in the public demo.');
     if ($f['error'] !== UPLOAD_ERR_OK) throw new RuntimeException('The PDF could not be uploaded.');
     if ($f['size'] > config('uploads.max_pdf_mb') * 1024 * 1024) {
         throw new RuntimeException('PDFs must be under ' . config('uploads.max_pdf_mb') . ' MB.');
@@ -449,13 +455,32 @@ function activity_label(string $action): string
         'message.replied' => 'Message answered',
         'message.deleted' => 'Message deleted',
         'user.password_changed' => 'Password changed',
+        'user.password_reset' => 'Password reset by email',
+        'hold.placed' => 'Hold placed',
+        'hold.ready' => 'Hold ready to collect',
+        'hold.cancelled' => 'Hold cancelled',
+        'hold.expired' => 'Hold expired',
+        'reminders.sent' => 'Reminder emails sent',
+        'review.created' => 'Book reviewed',
+        'review.updated' => 'Review updated',
+        'review.deleted' => 'Review deleted',
+        'export.downloaded' => 'Report exported',
+        'fine.charged' => 'Late fee charged',
+        'user.2fa_enabled' => 'Two-step sign-in turned on',
+        'user.2fa_disabled' => 'Two-step sign-in turned off',
+        'user.2fa_reset' => 'Two-step sign-in reset by a librarian',
+        'user.2fa_recovery_codes' => 'New recovery codes made',
+        'user.2fa_recovery_used' => 'Signed in with a recovery code',
+        'fine.paid' => 'Late fee paid',
+        'fine.waived' => 'Late fee waived',
     ][$action] ?? ucfirst(str_replace(['.', '_'], ' ', $action));
 }
 
 function activity_dot(string $action): string
 {
     if (str_contains($action, 'deleted')) return 'dot--red';
-    if (str_starts_with($action, 'loan.returned')) return 'dot--green';
+    if (str_starts_with($action, 'loan.returned') || $action === 'fine.paid') return 'dot--green';
+    if ($action === 'fine.charged') return 'dot--red';
     if (str_starts_with($action, 'loan')) return 'dot--blue';
     if (str_starts_with($action, 'message')) return '';
     return 'dot--muted';
@@ -480,4 +505,40 @@ function field_error_attrs(string $id, array $errors, string $key): string
 function field_error(string $id, array $errors, string $key): string
 {
     return isset($errors[$key]) ? '<p class="field__error" id="' . e($id) . '-error">' . icon('alert') . e($errors[$key]) . '</p>' : '';
+}
+
+/**
+ * The BookTrack mark (book-spine "B" with a gold bookmark) as inline SVG.
+ * The letter takes the surrounding text colour and the ribbon uses --gold,
+ * so it follows the light/dark theme without separate image files.
+ */
+function logo_mark(string $class = 'logo-mark'): string
+{
+    static $svg = null;
+    if ($svg === null) {
+        $svg = trim((string) @file_get_contents(dirname(__DIR__) . '/assets/img/logo-mark.svg'));
+    }
+    return str_replace('<svg ', '<svg class="' . e($class) . '" aria-hidden="true" focusable="false" ', $svg);
+}
+
+/**
+ * Send rows as a CSV download that opens cleanly in Excel (UTF-8 with a BOM).
+ * Cells that start like a formula (=, +, -, @) are prefixed with an apostrophe,
+ * so a book title or name can never run as a formula on a librarian's computer.
+ */
+function csv_download(string $filename, array $head, array $rows): void
+{
+    $safe = function ($v): string {
+        $v = (string)($v ?? '');
+        return $v !== '' && strpbrk($v[0], "=+-@\t\r") !== false ? "'" . $v : $v;
+    };
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . preg_replace('/[^A-Za-z0-9._-]/', '-', $filename) . '"');
+    header('Cache-Control: no-store');
+    $out = fopen('php://output', 'w');
+    fwrite($out, "\xEF\xBB\xBF");
+    fputcsv($out, $head, ',', '"', '');
+    foreach ($rows as $row) fputcsv($out, array_map(fn($v) => is_int($v) ? $v : $safe($v), $row), ',', '"', '');
+    fclose($out);
+    exit;
 }

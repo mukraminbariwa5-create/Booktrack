@@ -16,6 +16,16 @@ if (is_post() && $isMember) {
         if (input('action') === 'borrow') {
             create_loan($uid, (int)$book['id']);
             flash('success', 'You borrowed “' . $book['title'] . '”. It\'s due in ' . config('library.loan_days') . ' days.');
+        } elseif (input('action') === 'hold') {
+            place_hold($uid, (int)$book['id']);
+            $pos = hold_position(member_hold($uid, (int)$book['id']));
+            flash('success', $pos === 1
+                ? 'You\'re first in line for “' . $book['title'] . '”. We\'ll email you when a copy is kept for you.'
+                : 'You\'re #' . $pos . ' in line for “' . $book['title'] . '”. We\'ll email you when a copy is kept for you.');
+        } elseif (input('action') === 'cancel_hold') {
+            $h = member_hold($uid, (int)$book['id']);
+            if ($h) cancel_hold((int)$h['id'], $uid);
+            flash('success', 'You left the line for “' . $book['title'] . '”.');
         }
     } catch (DomainException $ex) {
         flash('error', $ex->getMessage());
@@ -24,7 +34,18 @@ if (is_post() && $isMember) {
 }
 
 $myLoan = $isMember ? q_one('SELECT * FROM loans WHERE user_id = ? AND book_id = ? AND status IN ' . ACTIVE_LOAN, [$uid, $book['id']]) : null;
+$block = $isMember && !$myLoan ? borrow_block_reason($uid) : null;
+$myHold = $isMember && !$myLoan ? member_hold($uid, (int)$book['id']) : null;
+$holdReady = $myHold && $myHold['status'] === 'ready';
+$canBorrow = (int)$book['available'] > 0 || $holdReady;   // a ready hold keeps a copy for this member
+$queue = hold_queue_length((int)$book['id']);
+$heldIds = $isMember ? array_map('intval', array_column(member_active_loans($uid), 'book_id')) : [];
 $fav = $isMember && is_favorite($uid, (int)$book['id']);
+$summary = rating_summary((int)$book['id']);
+$myReview = $isMember ? member_review($uid, (int)$book['id']) : null;
+$canReview = $isMember && can_review($uid, (int)$book['id']);
+// the book page shows a few reviews; "See all" opens the full, filterable list
+$topReviews = book_reviews((int)$book['id'], 0, 'recent', 3, 0, $myReview ? $uid : null);
 $timesBorrowed = (int)q_val('SELECT COUNT(*) FROM loans WHERE book_id = ?', [$book['id']]);
 $nextFree = (int)$book['available'] <= 0
     ? q_val('SELECT MIN(due_at) FROM loans WHERE book_id = ? AND status IN ' . ACTIVE_LOAN, [$book['id']])
@@ -57,6 +78,9 @@ require __DIR__ . '/includes/partials/header.php';
       <?php if ($book['category']): ?><a class="book-hero__category" href="<?= e(url('discover.php', ['category' => $book['category']])) ?>"><?= e($book['category']) ?></a><?php endif; ?>
       <h1><?= e($book['title']) ?></h1>
       <span class="book-hero__author">by <?= e($book['author']) ?></span>
+      <?php if ((int)$book['reviews'] > 0): ?>
+        <a class="book-hero__rating" href="#reviews"><?= stars_html((float)$book['rating']) ?><span><strong><?= e(rating_label((float)$book['rating'])) ?></strong> from <?= plural((int)$book['reviews'], 'review') ?></span></a>
+      <?php endif; ?>
     </div>
 
     <div class="row row--wrap">
@@ -64,25 +88,51 @@ require __DIR__ . '/includes/partials/header.php';
         <span class="badge badge--ok"><?= (int)$book['available'] ?> of <?= (int)$book['copies'] ?> available</span>
       <?php else: ?>
         <span class="badge badge--warn">All copies on loan<?= $nextFree ? ', back by ' . e(fmt_date($nextFree, 'j M')) : '' ?></span>
+        <?php if ($queue && !$myHold): ?><span class="badge badge--muted"><?= $queue === 1 ? '1 person' : $queue . ' people' ?> waiting</span><?php endif; ?>
       <?php endif; ?>
     </div>
 
     <?php if ($isMember): ?>
+    <?php if ($myLoan): ?>
+      <div class="alert alert--info" role="status">
+        <?= icon('book') ?>
+        <span><strong>You have this book.</strong>
+          <?= $myLoan['status'] === 'return_requested' ? 'Your return is waiting for the librarian to check it in.' : e(due_label($myLoan['due_at'])) . ' (' . e(fmt_date($myLoan['due_at'])) . ').' ?></span>
+      </div>
+    <?php elseif ($holdReady): ?>
+      <div class="alert alert--warn" role="status">
+        <?= icon('bell') ?>
+        <span><strong>Your hold is ready.</strong> A copy is kept for you until <?= e(fmt_date($myHold['expires_at'], 'l, j M')) ?>.<?= $block ? ' ' . e($block['message']) : ' Borrow it before then, or it goes to the next person in line.' ?></span>
+      </div>
+    <?php elseif ($myHold): $pos = hold_position($myHold); ?>
+      <div class="alert alert--info" role="status">
+        <?= icon('clock') ?>
+        <span><strong><?= $pos === 1 ? 'You\'re next in line.' : 'You\'re #' . $pos . ' in line.' ?></strong> We'll email you and keep a copy for <?= plural(hold_pickup_days(), 'day') ?> when one comes back.</span>
+      </div>
+    <?php elseif ($block && $canBorrow): ?>
+      <div class="alert alert--error" role="status">
+        <?= icon('alert') ?>
+        <span><strong><?= $block['code'] === 'overdue' ? 'Borrowing is paused.' : 'Loan limit reached.' ?></strong> <?= e($block['message']) ?></span>
+      </div>
+    <?php endif; ?>
     <div class="row row--wrap book-actions">
-      <?php if ($myLoan): ?>
-        <div class="alert alert--info" style="flex:1;min-width:260px">
-          <?= icon('book') ?>
-          <span>You have this book.
-            <?= $myLoan['status'] === 'return_requested' ? 'Your return is waiting for the librarian to check it in.' : e(due_label($myLoan['due_at'])) . ' (' . e(fmt_date($myLoan['due_at'])) . ').' ?>
-            <a class="link" href="<?= e(url('loans.php')) ?>">Manage loans</a></span>
-        </div>
-      <?php elseif ((int)$book['available'] > 0): ?>
+      <?php if ($myLoan || ($block && $canBorrow)): ?>
+        <a class="btn btn--lg btn--outline" href="<?= e(url('loans.php')) ?>"><?= icon('book') ?> Go to My loans</a>
+      <?php elseif ($myHold && !$holdReady): ?>
+        <form method="post" data-confirm="You'll lose your place in line for “<?= e($book['title']) ?>”." data-confirm-title="Leave the line?" data-confirm-ok="Leave the line">
+          <?= csrf_field() ?><input type="hidden" name="action" value="cancel_hold">
+          <button class="btn btn--lg btn--outline" type="submit"><?= icon('x') ?> Leave the line</button>
+        </form>
+      <?php elseif ($canBorrow): ?>
         <form method="post">
           <?= csrf_field() ?><input type="hidden" name="action" value="borrow">
           <button class="btn btn--lg" type="submit"><?= icon('book') ?> Borrow for <?= (int)config('library.loan_days') ?> days</button>
         </form>
       <?php else: ?>
-        <button class="btn btn--lg" type="button" disabled>Currently unavailable</button>
+        <form method="post">
+          <?= csrf_field() ?><input type="hidden" name="action" value="hold">
+          <button class="btn btn--lg" type="submit"><?= icon('clock') ?> Place a hold</button>
+        </form>
       <?php endif; ?>
 
       <form method="post" action="<?= e(url('api/favorite.php')) ?>" data-favorite>
@@ -116,6 +166,34 @@ require __DIR__ . '/includes/partials/header.php';
     </dl>
   </div>
 </section>
+
+<section class="ratings" id="reviews" aria-labelledby="reviews-h">
+  <div class="section-title">
+    <h2 id="reviews-h">Ratings and reviews</h2>
+    <?php if ($summary['total']): ?><a class="link small" href="<?= e(url('reviews.php', ['book' => $book['id']])) ?>">See all <?= (int)$summary['total'] ?></a><?php endif; ?>
+  </div>
+  <div class="ratings__grid <?= $summary['total'] ? '' : 'ratings__grid--empty' ?>">
+    <?php if ($summary['total']): ?>
+    <div class="ratings__summary">
+      <?php $starUrl = fn(int $st) => url('reviews.php', ['book' => $book['id'], 'stars' => $st]); $activeStars = 0; include __DIR__ . '/includes/partials/rating_summary.php'; ?>
+    </div>
+    <?php endif; ?>
+    <div class="ratings__main">
+      <?php $returnTo = 'book'; include __DIR__ . '/includes/partials/review_prompt.php'; ?>
+      <?php if ($topReviews): ?>
+        <ul class="review-list">
+          <?php foreach ($topReviews as $rv): $canModerate = !$isMember; $bookId = (int)$book['id']; include __DIR__ . '/includes/partials/review_item.php'; endforeach; ?>
+        </ul>
+      <?php elseif (!$summary['total']): ?>
+        <p class="rate-note small muted">No ratings yet<?= $canReview ? '. Yours would be the first.' : '.' ?></p>
+      <?php endif; ?>
+      <?php if ($summary['total'] > count($topReviews) + ($myReview ? 1 : 0)): ?>
+        <a class="btn btn--outline ratings__all" href="<?= e(url('reviews.php', ['book' => $book['id']])) ?>">See all <?= plural((int)$summary['total'], 'review') ?></a>
+      <?php endif; ?>
+    </div>
+  </div>
+</section>
+<?php if ($canReview) { $returnTo = 'book'; $asDialog = true; $presetRating = null; include __DIR__ . '/includes/partials/review_composer.php'; } ?>
 
 <?php if ($related && $isMember): ?>
 <section class="stack" style="gap:20px;margin-top:16px">

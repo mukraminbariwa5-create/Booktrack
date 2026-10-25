@@ -18,6 +18,11 @@ $attention = q_all("SELECT l.*, b.title, b.author, b.cover, u.name AS member_nam
                     WHERE l.status = 'return_requested' OR (l.status = 'borrowed' AND l.due_at < ?)
                     ORDER BY (l.status = 'return_requested') DESC, l.due_at ASC LIMIT 8", [$today]);
 
+// Holds waiting at the desk: a copy is kept for these members right now
+$readyHolds = q_all("SELECT h.id, h.user_id, h.book_id, h.expires_at, b.title, b.author, b.cover, u.name AS member_name
+                     FROM holds h JOIN books b ON b.id = h.book_id JOIN users u ON u.id = h.user_id
+                     WHERE h.status = 'ready' ORDER BY h.expires_at, h.id LIMIT 6");
+
 // Loans per month, last 6 months (grouped in PHP so it works on any database)
 $from = date('Y-m-01', strtotime('-5 months', strtotime(date('Y-m-01'))));
 $months = [];
@@ -56,9 +61,13 @@ require __DIR__ . '/../includes/partials/header.php';
     <p><?= e(date('l, j F Y')) ?></p>
   </div>
   <div class="row row--wrap">
+    <a class="btn btn--outline" href="<?= e(url('admin/desk.php')) ?>"><?= icon('scan') ?> Scan a card</a>
     <a class="btn" href="<?= e(url('admin/loans.php', ['issue' => 1])) ?>"><?= icon('swap') ?> Issue a book</a>
   </div>
 </header>
+<?php if (!two_factor_enabled((int)$user['id']) && !is_demo_account($user)): ?>
+  <a class="alert alert--warn" href="<?= e(url('profile.php')) ?>#two-step"><?= icon('shield') ?><span><strong>Protect the librarian account.</strong> Turn on two-step sign-in so a stolen password isn't enough to get in.</span></a>
+<?php endif; ?>
 
 <section class="stats" aria-label="Key numbers">
   <a class="stat" href="<?= e(url('admin/books.php')) ?>">
@@ -89,7 +98,7 @@ require __DIR__ . '/../includes/partials/header.php';
       <h2 id="attn-h">Needs attention</h2>
       <a class="link small" href="<?= e(url('admin/loans.php', ['tab' => 'requests'])) ?>">Open circulation</a>
     </div>
-    <?php if ($attention): ?>
+    <?php if ($attention || $readyHolds): ?>
     <div class="table-wrap">
       <table class="table table--compact table--stack">
         <thead><tr><th>Book and member</th><th class="hide-sm">Status</th><th><span class="sr-only">Action</span></th></tr></thead>
@@ -107,11 +116,23 @@ require __DIR__ . '/../includes/partials/header.php';
             </td>
           </tr>
         <?php endforeach; ?>
+        <?php foreach ($readyHolds as $h): $badge = '<span class="badge badge--warn">Hold ready until ' . e(fmt_date($h['expires_at'], 'j M')) . '</span>'; ?>
+          <tr>
+            <td><div class="cell-book"><?= cover_html($h, 'cover-sm') ?><span><strong><?= e($h['title']) ?></strong><span class="muted small">Kept for <?= e($h['member_name']) ?></span><span class="show-sm" style="margin-top:6px"><?= $badge ?></span></span></div></td>
+            <td class="hide-sm"><?= $badge ?></td>
+            <td class="num">
+              <form method="post" action="<?= e(url('admin/loans.php')) ?>">
+                <?= csrf_field() ?><input type="hidden" name="action" value="issue"><input type="hidden" name="user_id" value="<?= (int)$h['user_id'] ?>"><input type="hidden" name="book_id" value="<?= (int)$h['book_id'] ?>">
+                <button class="btn btn--outline btn--sm nowrap" type="submit"><?= icon('book') ?> Lend now</button>
+              </form>
+            </td>
+          </tr>
+        <?php endforeach; ?>
         </tbody>
       </table>
     </div>
     <?php else: ?>
-      <div class="empty"><?= empty_art('done') ?><h3>All caught up</h3><p>No return requests or overdue books right now.</p></div>
+      <div class="empty"><?= empty_art('done') ?><h3>All caught up</h3><p>No return requests, overdue books or holds to hand out right now.</p></div>
     <?php endif; ?>
   </section>
 

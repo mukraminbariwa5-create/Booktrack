@@ -180,6 +180,7 @@ require __DIR__ . '/../includes/partials/header.php';
       <button class="btn btn--outline" type="submit" data-busy="Finding covers…" title="Look up real covers on Open Library for books that have none"><?= icon('image') ?> Find <?= $missingCovers ?> missing <?= $missingCovers === 1 ? 'cover' : 'covers' ?></button>
     </form>
   <?php endif; ?>
+  <a class="btn btn--outline" href="<?= e(url('admin/export.php', array_filter(['type' => 'books', 'q' => $search, 'category' => $category]))) ?>" title="Download this list as a spreadsheet (CSV)" download><?= icon('download') ?> Export</a>
   <button class="btn" type="button" data-open="book-dialog" data-reset><?= icon('plus') ?> Add book</button>
 </header>
 
@@ -197,17 +198,19 @@ require __DIR__ . '/../includes/partials/header.php';
 
   <?php if ($books): ?>
   <div class="table-wrap">
-    <table class="table table--stack">
+    <table class="table table--stack table--books">
       <thead><tr><th>Title</th><th>Category</th><th class="num">Copies</th><th>Availability</th><th class="num">Loans</th><th class="num">Actions</th></tr></thead>
       <tbody>
       <?php foreach ($books as $b): ?>
         <tr>
-          <td><a class="cell-book" href="<?= e(url('book.php', ['id' => $b['id']])) ?>"><?= cover_html($b, 'cover-sm') ?><span><strong><?= e($b['title']) ?></strong><span class="muted small"><?= e($b['author']) ?><?= $b['published_year'] ? ', ' . e($b['published_year']) : '' ?></span></span></a></td>
-          <td><?= $b['category'] ? '<span class="badge badge--muted badge--plain">' . e($b['category']) . '</span>' : '<span class="muted">—</span>' ?></td>
-          <td class="num"><?= (int)$b['copies'] ?></td>
-          <td><?= (int)$b['available'] > 0 ? '<span class="badge badge--ok">' . (int)$b['available'] . ' available</span>' : '<span class="badge badge--warn">All on loan</span>' ?>
+          <td><a class="cell-book" href="<?= e(url('book.php', ['id' => $b['id']])) ?>"><?= cover_html($b, 'cover-sm') ?><span><strong><?= e($b['title']) ?></strong><span class="muted small"><?= e($b['author']) ?><?= $b['published_year'] ? ', ' . e($b['published_year']) : '' ?></span>
+            <span class="book-row-meta show-sm"><?= e(implode(', ', array_filter([$b['category'], plural((int)$b['copies'], 'copy', 'copies')]))) ?>,
+              <span class="<?= (int)$b['available'] > 0 ? 'is-ok' : 'is-out' ?>"><?= (int)$b['available'] > 0 ? (int)$b['available'] . ' available' : 'all on loan' ?></span></span></span></a></td>
+          <td class="hide-sm"><?= $b['category'] ? '<span class="badge badge--muted badge--plain">' . e($b['category']) . '</span>' : '<span class="muted">—</span>' ?></td>
+          <td class="num hide-sm"><?= (int)$b['copies'] ?></td>
+          <td class="hide-sm"><?= (int)$b['available'] > 0 ? '<span class="badge badge--ok">' . (int)$b['available'] . ' available</span>' : '<span class="badge badge--warn">All on loan</span>' ?>
             <?php if ($b['pdf']): ?><span class="badge badge--info badge--plain" title="Has an e-book PDF">PDF</span><?php endif; ?></td>
-          <td class="num"><?= (int)$b['times'] ?></td>
+          <td class="num hide-sm"><?= (int)$b['times'] ?></td>
           <td>
             <div class="actions">
               <button class="btn btn--ghost btn--sm btn--icon" type="button" data-open="book-dialog" data-fill="<?= e($bookJson($b)) ?>" aria-label="Edit <?= e($b['title']) ?>" title="Edit"><?= icon('edit') ?></button>

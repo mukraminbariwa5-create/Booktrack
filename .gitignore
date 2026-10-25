@@ -1,3 +1,5 @@
+# this server's own settings (database password, SMTP login): never commit them
+config.local.php
 # local database for tests
 *.sqlite
 # user uploads. Demo cover art stays on your own machine (publisher artwork isn't
@@ -7,3 +9,10 @@ uploads/covers/*
 uploads/pdfs/*
 !uploads/pdfs/.htaccess
 !uploads/pdfs/.gitkeep
+# emails saved by the 'log' mail driver and the daily reminder stamp
+storage/mail/*
+!storage/mail/.gitkeep
+storage/*.txt
+
+# upload package for hosting (made from the project, not part of it)
+deploy/

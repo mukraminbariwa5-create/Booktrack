@@ -50,6 +50,7 @@ require __DIR__ . '/includes/partials/auth_top.php';
 ?>
 <section class="auth__card auth__card--wide" aria-labelledby="signup-h">
   <h1 id="signup-h">Create an account</h1>
+  <?php if (demo_mode()): ?><div class="alert alert--info"><?= icon('shield') ?><span>This is a public demo that resets every day. Use a made-up name and a password you don't use anywhere else.</span></div><?php endif; ?>
   <p class="auth__lede">Members can borrow up to <?= (int)config('library.max_active_loans') ?> books at a time, each for <?= (int)config('library.loan_days') ?> days.</p>
 
   <?php if (isset($errors['form'])): ?><div class="alert alert--error" role="alert"><?= icon('alert') ?><span><?= e($errors['form']) ?></span></div>

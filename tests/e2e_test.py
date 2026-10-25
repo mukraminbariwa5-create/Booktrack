@@ -138,8 +138,114 @@ check(q(f"SELECT id FROM users WHERE id={aid}"), 'member with books on loan cann
 r = post(admin, '/admin/members.php', {'action': 'save', 'name': 'N' * 300, 'username': 'longname', 'password': 'password1', 'is_active': '1'})
 check(r.status_code < 500 and 'Fatal' not in r.text and 'Uncaught' not in r.text, f'over-long name handled gracefully ({r.status_code})')
 
+print('6b. Holds, reviews, calendar and the desk')
+diego, r = login('diego', 'member123'); did = q("SELECT id FROM users WHERE username='diego'")[0]['id']
+out = q("SELECT b.id FROM books b WHERE b.copies <= (SELECT COUNT(*) FROM loans l WHERE l.book_id=b.id AND l.status IN ('borrowed','return_requested')) AND b.id NOT IN (SELECT book_id FROM loans WHERE user_id=%d AND status IN ('borrowed','return_requested')) AND b.id NOT IN (SELECT book_id FROM holds WHERE user_id=%d AND status IN ('waiting','ready')) LIMIT 1" % (did, did))
+if out:
+    hb = out[0]['id']
+    r = post(diego, '/book.php?id=%d' % hb, {'action': 'hold'})
+    check(q(f"SELECT id FROM holds WHERE user_id={did} AND book_id={hb} AND status='waiting'"), 'member can place a hold on a book that is all out')
+    r = diego.get(B + '/loans.php'); check('Holds' in r.text and 'in line' in r.text, 'holds show on My loans')
+rv_book = q(f"SELECT book_id FROM loans WHERE user_id={did} AND book_id NOT IN (SELECT book_id FROM reviews WHERE user_id={did}) LIMIT 1")[0]['book_id']
+post(diego, '/reviews.php?book=%d' % rv_book, {'action': 'review', 'rating': '4', 'body': 'Solid read.'}, page='/book.php?id=%d' % rv_book)
+check(q(f"SELECT id FROM reviews WHERE user_id={did} AND book_id={rv_book} AND rating=4"), 'member can review a book they borrowed')
+never = q(f"SELECT id FROM books WHERE id NOT IN (SELECT book_id FROM loans WHERE user_id={did}) LIMIT 1")[0]['id']
+post(diego, '/reviews.php?book=%d' % never, {'action': 'review', 'rating': '5'}, page='/book.php?id=%d' % never)
+r = diego.get(B + '/reviews.php?book=%d&stars=4' % rv_book); check('Ratings and reviews' in r.text and 'rsum' in r.text, 'all-reviews page shows the summary and filters')
+check(not q(f"SELECT id FROM reviews WHERE user_id={did} AND book_id={never}"), 'reviews need a past loan of the book')
+dloan = q(f"SELECT id FROM loans WHERE user_id={did} AND status='borrowed' LIMIT 1")
+if dloan:
+    r = diego.get(B + '/calendar.php?loan=%d' % dloan[0]['id'])
+    check(r.headers.get('content-type', '').startswith('text/calendar') and 'BEGIN:VEVENT' in r.text, 'due date downloads as a calendar event')
+other = q(f"SELECT id FROM loans WHERE user_id<>{did} AND status='borrowed' LIMIT 1")[0]['id']
+check(diego.get(B + '/calendar.php?loan=%d' % other).status_code == 404, "members can't download someone else's loan")
+check('BT-%06d' % did in diego.get(B + '/profile.php').text, 'profile shows the library card number')
+r = admin.get(B + '/admin/desk.php?card=BT-%06d' % did); check('Diego' in r.text and 'Lend a book' in r.text, 'desk opens a member from their card number')
+r = admin.get(B + '/admin/desk.php?card=diego'); check('admin/desk.php?card=BT-%06d' % did in r.url or 'Lend a book' in r.text, 'desk finds a member by name')
+check('admin/' in diego.get(B + '/admin/desk.php').url or 'Desk' not in diego.get(B + '/admin/desk.php').text, 'members cannot open the desk')
+free = q("SELECT b.id FROM books b WHERE b.copies > (SELECT COUNT(*) FROM loans l WHERE l.book_id=b.id AND l.status IN ('borrowed','return_requested')) + (SELECT COUNT(*) FROM holds h WHERE h.book_id=b.id AND h.status='ready') AND b.id NOT IN (SELECT book_id FROM loans WHERE user_id=%d AND status IN ('borrowed','return_requested')) LIMIT 1" % did)[0]['id']
+before = q(f"SELECT COUNT(*) n FROM loans WHERE user_id={did} AND book_id={free} AND status='borrowed'")[0]['n']
+post(admin, '/admin/desk.php', {'action': 'lend', 'member_id': did, 'book_id': free, 'override': '1'}, page='/admin/desk.php?card=BT-%06d' % did)
+lent = q(f"SELECT id FROM loans WHERE user_id={did} AND book_id={free} AND status='borrowed'")
+check(len(lent) == before + 1, 'desk lends a book to the scanned member')
+post(admin, '/admin/desk.php', {'action': 'return', 'member_id': did, 'loan_id': lent[0]['id']}, page='/admin/desk.php?card=BT-%06d' % did)
+check(q(f"SELECT status FROM loans WHERE id={lent[0]['id']}")[0]['status'] == 'returned', 'desk checks a book in')
+
 print('7. Sign-in lockout')
 for i in range(5): s, r = login('carla', 'wrong-%d' % i)
 s, r = login('carla', 'member123')
 check('login.php' in r.url, 'lockout still applies when the attacker starts a fresh session')
+print('8. Exports, password reset and security headers')
+import csv, io
+r = admin.get(B + '/admin/export.php?type=loans&tab=overdue')
+rows = list(csv.reader(io.StringIO(r.content.decode('utf-8-sig')))) if r.ok else []
+check(r.headers.get('content-type', '').startswith('text/csv') and rows and rows[0][0] == 'Book', 'librarians can export the overdue list as CSV')
+tab_count = re.search(r'Overdue <span class="count">(\d+)</span>', admin.get(B + '/admin/loans.php').text)
+check(tab_count and len(rows) - 1 == int(tab_count.group(1)), 'the export matches the Overdue tab')
+check(len(admin.get(B + '/admin/export.php?type=members').content.decode('utf-8-sig').strip().splitlines()) - 1 == q("SELECT COUNT(*) n FROM users WHERE role='member'")[0]['n'], 'the member export has every member')
+check('text/csv' not in diego.get(B + '/admin/export.php?type=members').headers.get('content-type', ''), "members can't download exports")
+anon = requests.Session(); r = post(anon, '/forgot_password.php', {'identifier': 'diego'})
+check('Check your email' in r.text, 'forgot password confirms without saying whether the account exists')
+r = post(requests.Session(), '/forgot_password.php', {'identifier': 'no-such-user-xyz'})
+check('Check your email' in r.text, 'unknown accounts get the same confirmation')
+check('expired' in anon.get(B + '/reset_password.php?token=' + 'a' * 64).text, 'a made-up reset link is refused')
+h = anon.get(B + '/login.php').headers.get('content-security-policy', '')
+check("script-src 'self'" in h and "object-src 'none'" in h and 'frame-ancestors' in h, 'pages send a Content-Security-Policy')
+
+print('9. Late fees')
+def php_today():
+    return subprocess.check_output(['php', '-r', "require '%s/includes/bootstrap.php'; echo today();" % ROOT]).decode().strip()
+today_s = php_today()
+late = q(f"SELECT id, due_at FROM loans WHERE status IN ('borrowed','return_requested') AND due_at < '{today_s}' ORDER BY due_at LIMIT 1")
+if late:
+    r = post(admin, '/admin/loans.php', {'action': 'return', 'loan_id': late[0]['id']}, page='/admin/loans.php')
+    fee = q(f"SELECT amount FROM fines WHERE loan_id={late[0]['id']}")
+    check(bool(fee) and float(fee[0]['amount']) > 0 and 'fee was added' in r.text, 'checking in a late book charges a fee and says so')
+else:
+    check(False, 'test data has an overdue loan to check in')
+r = admin.get(B + '/admin/loans.php?tab=fines'); check('Fines <span class="count">' in r.text and 'Waive' in r.text, 'circulation has a Fines tab with unpaid fees')
+fid = q("SELECT id FROM fines WHERE status='unpaid' ORDER BY id LIMIT 1")[0]['id']
+post(diego, '/admin/loans.php', {'action': 'fine_waive', 'fine_id': fid}, page='/loans.php')
+check(q(f"SELECT status FROM fines WHERE id={fid}")[0]['status'] == 'unpaid', "members can't waive fees")
+post(admin, '/admin/loans.php', {'action': 'fine_paid', 'fine_id': fid}, page='/admin/loans.php?tab=fines')
+check(q(f"SELECT status FROM fines WHERE id={fid}")[0]['status'] == 'paid', 'librarians can mark a fee paid')
+r = admin.get(B + '/admin/export.php?type=fines'); check(r.headers.get('content-type', '').startswith('text/csv') and 'Days late' in r.content.decode('utf-8-sig'), 'late fees export as CSV')
+
+print('10. Two-step sign-in')
+import hmac, hashlib, struct, time as _time, base64, html
+def totp(secret, offset=0):
+    key = base64.b32decode(secret.replace(' ', '')); step = int(_time.time() // 30) + offset
+    h = hmac.new(key, struct.pack('>Q', step), hashlib.sha1).digest(); o = h[19] & 15
+    return str((struct.unpack('>I', h[o:o + 4])[0] & 0x7fffffff) % 1000000).zfill(6)
+ella, _ = login('ella', 'member123')
+post(ella, '/profile.php', {'action': '2fa_start'}, page='/profile.php')
+page = ella.get(B + '/profile.php?setup=2fa').text
+m = re.search(r'class="twofa__key">([A-Z2-7 ]+)<', page); secret = m.group(1) if m else ''
+check(bool(secret) and '<svg class="qr"' in page, 'setup shows a QR code and a setup key')
+r = post(ella, '/profile.php', {'action': '2fa_confirm', 'code': totp(secret)}, page='/profile.php?setup=2fa')
+codes = re.findall(r'<li><code>([a-z2-7]{4}-[a-z2-7]{4})</code></li>', r.text)
+check(len(codes) == 10, 'turning it on shows 10 recovery codes once')
+check('<li><code>' not in ella.get(B + '/profile.php').text, 'recovery codes are not shown again')
+s2, r = login('ella', 'member123')
+check(r.url.endswith('/two_factor.php'), 'the password leads to the code step')
+check('login.php' in s2.get(B + '/discover.php').url, 'a half-signed-in session can\'t open pages')
+r = s2.get(B + '/api/search.php?q=atomic', headers={'Accept': 'application/json', 'X-Requested-With': 'fetch'}, allow_redirects=False)
+check(r.status_code in (401, 403) or (r.status_code == 302 and 'login.php' in r.headers.get('Location', '')), '…or the APIs')
+r = post(s2, '/two_factor.php', {'code': '000000' if totp(secret) != '000000' else '111111'})
+check('didn' in html.unescape(r.text) and 'more tries' in r.text, 'a wrong code is refused')
+_time.sleep(31 - _time.time() % 30)
+r = post(s2, '/two_factor.php', {'code': totp(secret)})
+check(r.url.endswith('/discover.php'), 'the right code signs in')
+s3, r = login('ella', 'member123')
+r = post(s3, '/two_factor.php', {'code': totp(secret)})
+check(r.url.endswith('/two_factor.php'), 'a code can\'t be used twice')
+r = post(s3, '/two_factor.php', {'code': codes[0]})
+check(r.url.endswith('/discover.php') and '9 codes left' in r.text, 'a recovery code signs in and says how many are left')
+eid = q("SELECT id FROM users WHERE username='ella'")[0]['id']
+check('Turn off two-step' in admin.get(B + '/admin/desk.php?card=BT-%06d' % eid).text, 'the desk shows the turn-off button for that member')
+post(admin, '/admin/desk.php', {'action': '2fa_off', 'member_id': eid}, page='/admin/desk.php?card=BT-%06d' % eid)
+s4, r = login('ella', 'member123')
+check(r.url.endswith('/discover.php'), 'a librarian can turn it off at the desk')
+
 print(f'\n{ok} passed, {fail} failed')
+raise SystemExit(1 if fail else 0)

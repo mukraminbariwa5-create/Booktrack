@@ -21,6 +21,7 @@ if (is_post()) {
         $existing = $id ? q_one("SELECT * FROM users WHERE id = ? AND role = 'member'", [$id]) : null;
 
         if ($id && !$existing) $formErrors[] = 'That member no longer exists.';
+        if ($existing && is_demo_account($existing)) $formErrors[] = 'This is a shared demo account, so it can\'t be changed. Add a new member to try editing one.';
         if ($data['name'] === '') $formErrors[] = 'Name is required.';
         array_push($formErrors, ...length_errors($data, ['name' => [120, 'Name'], 'email' => [160, 'Email'], 'phone' => [40, 'Phone']]));
         if (strlen($password) > 72) $formErrors[] = 'Passwords can be at most 72 characters.';
@@ -50,7 +51,9 @@ if (is_post()) {
 
     if ($action === 'delete') {
         $m = q_one("SELECT * FROM users WHERE id = ? AND role = 'member'", [input_int('id')]);
-        if ($m) {
+        if ($m && is_demo_account($m)) {
+            flash('error', $m['name'] . ' is a shared demo account, so it can\'t be removed. Add a new member to try deleting one.');
+        } elseif ($m) {
             if (active_loan_count((int)$m['id'])) {
                 flash('error', $m['name'] . ' still has books on loan. Check them in first, or deactivate the account instead.');
             } else {
@@ -92,7 +95,10 @@ require __DIR__ . '/../includes/partials/header.php';
     <h1>Members</h1>
     <p><?= plural($p['total'], 'member') ?><?= $search !== '' || $status !== '' ? ' match your filters' : '' ?>.</p>
   </div>
-  <button class="btn" type="button" data-open="member-dialog" data-reset><?= icon('plus') ?> Add member</button>
+  <div class="row row--wrap">
+    <a class="btn btn--outline" href="<?= e(url('admin/export.php', array_filter(['type' => 'members', 'q' => $search, 'status' => $status]))) ?>" title="Download this list as a spreadsheet (CSV)" download><?= icon('download') ?> Export</a>
+    <button class="btn" type="button" data-open="member-dialog" data-reset><?= icon('plus') ?> Add member</button>
+  </div>
 </header>
 
 <section class="card card--flush">

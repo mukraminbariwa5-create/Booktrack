@@ -1,6 +1,7 @@
 <?php if (current_user()): ?>
     </main>
   </div>
+  <?= $tabbarHtml ?? '' ?>
 </div>
 
 <div class="reminders" id="reminders" popover aria-labelledby="reminders-h">
@@ -36,7 +37,7 @@
 
 <div class="flashes" aria-live="polite">
   <?php foreach (take_flashes() as $f): ?>
-    <div class="flash <?= $f['type'] === 'error' ? 'flash--error' : '' ?><?= !empty($f['undo']) ? ' flash--undo' : '' ?>" role="status">
+    <div class="flash <?= $f['type'] === 'error' ? 'flash--error' : '' ?><?= !empty($f['undo']) ? ' flash--undo' : '' ?>" role="<?= $f['type'] === 'error' ? 'alert' : 'status' ?>"<?= $f['type'] === 'error' ? ' data-sticky' : '' ?>>
       <?= icon($f['type'] === 'error' ? 'alert' : 'check') ?>
       <span><?= e($f['message']) ?></span>
       <?php if (!empty($f['undo'])): ?>

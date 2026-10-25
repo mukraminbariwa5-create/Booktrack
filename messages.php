@@ -13,7 +13,7 @@ require __DIR__ . '/includes/partials/header.php';
 
 $mine = 'member';
 $memberId = $uid;
-$chatHead = '<span class="chat__avatar chat__avatar--library"><img src="' . e(asset('img/logo.png')) . '" alt=""></span>'
+$chatHead = '<span class="chat__avatar chat__avatar--library">' . logo_mark() . '</span>'
     . '<div class="chat__who"><strong>The Library</strong><span>Ask about a book, your loans or your account</span></div>';
 $emptyHint = 'Say hello! Ask for a book you can\'t find, ask to keep a book longer, or report a problem. A librarian will reply here.';
 $quick = $thread ? [] : [

@@ -21,7 +21,8 @@ if ($category !== '') {
 if ($onlyAvailable) $where[] = '(b.copies - COALESCE(al.active, 0)) > 0';
 $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
 
-$orders = ['new' => 'b.created_at DESC, b.id DESC', 'title' => 'b.title ASC', 'author' => 'b.author ASC, b.title ASC'];
+$orders = ['new' => 'b.created_at DESC, b.id DESC', 'title' => 'b.title ASC', 'author' => 'b.author ASC, b.title ASC',
+           'rating' => 'COALESCE(rv.avg_rating, 0) DESC, COALESCE(rv.n_reviews, 0) DESC, b.title ASC'];
 $orderSql = $orders[$sort] ?? $orders['new'];
 
 $total = (int)q_val('SELECT COUNT(*) FROM ' . books_from() . " $whereSql", $params);
@@ -38,6 +39,7 @@ $featured = $showFeature
     ? q_one('SELECT ' . book_columns() . ' FROM ' . books_from() . ' ORDER BY ((b.copies - COALESCE(al.active, 0)) > 0) DESC, b.created_at DESC, b.id DESC LIMIT 1')
     : null;
 $heldIds = array_map('intval', array_column($loans, 'book_id'));
+$block = borrow_block_reason((int)$user['id']);
 
 // Home screen: swipeable rows (popular posters, new arrivals, what's on the
 // shelf now, then any category big enough to fill a row) instead of one long
@@ -81,6 +83,12 @@ $chipUrl = fn(string $c) => url('discover.php', array_filter(['category' => $c, 
   <?php if ($filtering && $books): ?><a class="btn btn--ghost" href="<?= e(url('discover.php')) ?>"><?= $browseAll && $search === '' && $category === '' && !$onlyAvailable ? 'Back to Discover' : 'Clear filters' ?></a><?php endif; ?>
 </header>
 
+<?php if ($block && $block['code'] === 'overdue'): ?>
+<a class="alert alert--error" href="<?= e(url('loans.php')) ?>" style="text-decoration:none">
+  <?= icon('clock') ?><span><strong>Borrowing is paused.</strong> <?= e($block['message']) ?> <span class="link">Go to My loans</span></span>
+</a>
+<?php endif; ?>
+
 <?php if ($featured): $fid = (int)$featured['id']; ?>
 <section class="feature hide-mobile" aria-labelledby="feature-h" data-book="<?= $fid ?>">
   <?= cover_ambient($featured) ?>
@@ -92,6 +100,8 @@ $chipUrl = fn(string $c) => url('discover.php', array_filter(['category' => $c, 
     <div class="feature__actions">
       <?php if (in_array($fid, $heldIds, true)): ?>
         <a class="btn btn--outline" href="<?= e(url('loans.php')) ?>">You have this book</a>
+      <?php elseif ((int)$featured['available'] > 0 && $block): ?>
+        <?php /* the banner above explains why borrowing is paused */ ?>
       <?php elseif ((int)$featured['available'] > 0): ?>
         <form method="post" action="<?= e(url('book.php', ['id' => $fid])) ?>">
           <?= csrf_field() ?><input type="hidden" name="action" value="borrow">
@@ -109,11 +119,11 @@ $chipUrl = fn(string $c) => url('discover.php', array_filter(['category' => $c, 
         $tone = $loan['status'] === 'return_requested' ? '' : ($d < 0 ? 'is-late' : ($d <= (int)config('library.due_soon_days') ? 'is-soon' : ''));
         $total = max(1, (strtotime($loan['due_at']) - strtotime($loan['borrowed_at'])) / 86400);
         $pct = (int)max(4, min(100, round((strtotime(today()) - strtotime($loan['borrowed_at'])) / 86400 / $total * 100)));
-        $when = $loan['status'] === 'return_requested' ? 'Returning' : ($d < 0 ? abs($d) . ' d late' : ($d === 0 ? 'Today' : plural($d, 'day')));
+        $when = $loan['status'] === 'return_requested' ? 'Waiting for check-in' : ($d < 0 ? plural(abs($d), 'day') . ' late' : ($d === 0 ? 'Due today' : plural($d, 'day') . ' left'));
       ?>
         <div class="due">
           <div class="due__row"><a href="<?= e(url('book.php', ['id' => $loan['book_id']])) ?>"><?= e($loan['title']) ?></a><span class="due__when <?= $tone ?>"><?= e($when) ?></span></div>
-          <div class="progress <?= $tone ?>" role="img" aria-label="<?= e(due_label($loan['due_at'])) ?>"><span style="width: <?= $pct ?>%"></span></div>
+          <?php if ($loan['status'] !== 'return_requested'): ?><div class="progress <?= $tone ?>" role="img" aria-label="<?= e(due_label($loan['due_at'])) ?>"><span style="width: <?= $pct ?>%"></span></div><?php endif; ?>
         </div>
       <?php endforeach; ?>
       <a class="link small" href="<?= e(url('loans.php')) ?>"><?= count($loans) > 3 ? 'See all ' . count($loans) . ' loans' : 'Manage loans' ?></a>
@@ -142,8 +152,8 @@ $chipUrl = fn(string $c) => url('discover.php', array_filter(['category' => $c, 
           <span class="poster__info">
             <span class="poster__rank" aria-hidden="true"><?= $rank + 1 ?></span>
             <strong><?= e($b['title']) ?></strong>
-            <span class="poster__author"><?= e($b['author']) ?><?= $b['category'] ? ' · ' . e($b['category']) : '' ?></span>
-            <span class="poster__tag <?= $avail ? '' : 'is-out' ?>"><?= $avail ? ((int)$b['copies'] > 1 ? $avail . ' of ' . (int)$b['copies'] . ' available' : 'Available') : 'On loan' ?></span>
+            <span class="poster__author"><?= e($b['author']) ?><?= $b['category'] ? ', ' . e($b['category']) : '' ?></span>
+            <?php if (in_array((int)$b['id'], $heldIds, true)): ?><span class="poster__tag is-mine">On your loans</span><?php else: ?><span class="poster__tag <?= $avail ? '' : 'is-out' ?>"><?= $avail ? ((int)$b['copies'] > 1 ? $avail . ' of ' . (int)$b['copies'] . ' available' : 'Available') : 'On loan' ?></span><?php endif; ?>
           </span>
         </a>
       <?php endforeach; ?>
@@ -160,14 +170,14 @@ $chipUrl = fn(string $c) => url('discover.php', array_filter(['category' => $c, 
         $tone = $loan['status'] === 'return_requested' ? '' : ($d < 0 ? 'is-late' : ($d <= (int)config('library.due_soon_days') ? 'is-soon' : ''));
         $span = max(1, (strtotime($loan['due_at']) - strtotime($loan['borrowed_at'])) / 86400);
         $pct = (int)max(4, min(100, round((strtotime(today()) - strtotime($loan['borrowed_at'])) / 86400 / $span * 100)));
-        $when = $loan['status'] === 'return_requested' ? 'Returning' : ($d < 0 ? abs($d) . ' days late' : ($d === 0 ? 'Due today' : 'Due in ' . plural($d, 'day')));
+        $when = $loan['status'] === 'return_requested' ? 'Waiting for check-in' : ($d < 0 ? plural(abs($d), 'day') . ' late' : ($d === 0 ? 'Due today' : 'Due in ' . plural($d, 'day')));
       ?>
         <a class="due-card" href="<?= e(url('book.php', ['id' => $loan['book_id']])) ?>" data-book="<?= (int)$loan['book_id'] ?>">
           <?= cover_html(['title' => $loan['title'], 'author' => $loan['author'], 'cover' => $loan['cover']], 'cover-sm') ?>
           <span class="due-card__body">
             <strong><?= e($loan['title']) ?></strong>
             <span class="due__when <?= $tone ?>"><?= e($when) ?></span>
-            <span class="progress <?= $tone ?>" aria-hidden="true"><span style="width: <?= $pct ?>%"></span></span>
+            <?php if ($loan['status'] !== 'return_requested'): ?><span class="progress <?= $tone ?>" aria-hidden="true"><span style="width: <?= $pct ?>%"></span></span><?php endif; ?>
           </span>
         </a>
       <?php endforeach; ?>
@@ -201,6 +211,7 @@ $chipUrl = fn(string $c) => url('discover.php', array_filter(['category' => $c, 
         <option value="new" <?= $sort === 'new' ? 'selected' : '' ?>>Newest</option>
         <option value="title" <?= $sort === 'title' ? 'selected' : '' ?>>Title A–Z</option>
         <option value="author" <?= $sort === 'author' ? 'selected' : '' ?>>Author A–Z</option>
+        <option value="rating" <?= $sort === 'rating' ? 'selected' : '' ?>>Top rated</option>
       </select>
       <noscript><button class="btn btn--ghost btn--sm">Apply</button></noscript>
     </form>
@@ -225,6 +236,19 @@ $chipUrl = fn(string $c) => url('discover.php', array_filter(['category' => $c, 
       <p>Try a different search or category.</p>
       <a class="btn btn--ghost btn--sm" href="<?= e(url('discover.php')) ?>">Clear filters</a>
     </div>
+    <?php
+      $suggest = q_all('SELECT ' . book_columns() . ' FROM ' . books_from()
+          . ' LEFT JOIN (SELECT book_id, COUNT(*) AS n FROM loans GROUP BY book_id) pop ON pop.book_id = b.id'
+          . ' WHERE (b.copies - COALESCE(al.active, 0)) > 0 ORDER BY COALESCE(pop.n, 0) DESC, b.title LIMIT 8');
+    ?>
+    <?php if ($suggest): ?>
+    <section class="stack" style="gap:16px" aria-labelledby="suggest-h">
+      <div class="section-title"><h2 id="suggest-h">Popular and on the shelf now</h2></div>
+      <div class="shelf-row" data-row>
+        <?php foreach ($suggest as $book) include __DIR__ . '/includes/partials/book_card.php'; ?>
+      </div>
+    </section>
+    <?php endif; ?>
   <?php endif; ?>
 </section>
 <?php endif; ?>

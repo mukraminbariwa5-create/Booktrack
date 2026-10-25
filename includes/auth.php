@@ -82,7 +82,11 @@ function attempt_login(string $username, string $password): ?string
     }
 
     login_attempts_sql('DELETE FROM login_attempts WHERE username = ?', [$username]);
-    sign_in_as((int)$user['id']);
+    if (two_factor_enabled((int)$user['id'])) {
+        two_factor_begin((int)$user['id']);   // signed in only after the code (two_factor.php)
+    } else {
+        sign_in_as((int)$user['id']);
+    }
     return null;
 }
 
@@ -130,6 +134,20 @@ function logout(): void
     }
 }
 
+/** After a successful sign-in: back to the page the user was trying to open, or their home page. */
+function redirect_after_sign_in(): void
+{
+    $user = current_user(true);
+    $intended = $_SESSION['intended'] ?? null;
+    unset($_SESSION['intended']);
+    // only follow same-app paths for the intended redirect
+    if ($intended && str_starts_with($intended, base_url()) && !str_starts_with($intended, '//') && !str_contains($intended, 'logout')) {
+        $isAdminPath = str_contains($intended, '/admin/');
+        if ($isAdminPath === ($user['role'] === 'admin')) { header('Location: ' . $intended); exit; }
+    }
+    redirect(home_for($user));
+}
+
 function home_for(array $user): string
 {
     return $user['role'] === 'admin' ? 'admin/index.php' : 'discover.php';
@@ -152,6 +170,12 @@ function require_role(string $role): array
     if ($user['role'] !== $role) {
         if (wants_json()) json_out(['ok' => false, 'error' => 'Not allowed.'], 403);
         redirect(home_for($user));
+    }
+    // Optional policy: librarians must protect their account with two-step sign-in first.
+    if ($role === 'admin' && config('auth.require_2fa_for_librarians') && !two_factor_enabled((int)$user['id']) && !is_demo_account($user)) {
+        if (wants_json()) json_out(['ok' => false, 'error' => 'Turn on two-step sign-in first.'], 403);
+        flash('error', 'Librarian accounts need two-step sign-in. Turn it on below to continue.');
+        redirect('profile.php', ['setup' => '2fa']);
     }
     return $user;
 }

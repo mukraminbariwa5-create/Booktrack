@@ -1,5 +1,9 @@
     </main>
-    <footer class="auth__foot">&copy; <?= date('Y') ?> <?= e(config('app_name')) ?></footer>
+    <?php $repo = (string)config('project.repo', ''); $author = (string)config('project.author', ''); ?>
+    <footer class="auth__foot">
+      &copy; <?= date('Y') ?> <a class="link" href="<?= e(url('index.php')) ?>"><?= e(config('app_name')) ?></a><?php if ($author): ?>, a library-system portfolio project by <?= e($author) ?><?php endif; ?>.
+      <?php if ($repo): ?><a class="link" href="<?= e($repo) ?>" rel="noopener">Source code</a><?php endif; ?>
+    </footer>
   </div>
 
   <aside class="auth__wall" aria-label="About the library">
@@ -33,7 +37,7 @@
               <li class="spotlight__item<?= $i === 0 ? ' is-active' : '' ?>"<?= $i ? ' aria-hidden="true"' : '' ?>>
                 <?= cover_html($b, 'cover spotlight__cover') ?>
                 <div class="spotlight__text">
-                  <span class="spotlight__kicker">On the shelf<?= $b['category'] ? ' · ' . e($b['category']) : '' ?></span>
+                  <span class="spotlight__kicker">On the shelf<?= $b['category'] ? ' in ' . e($b['category']) : '' ?></span>
                   <strong><?= e($b['title']) ?></strong>
                   <span><?= e($b['author']) ?></span>
                 </div>

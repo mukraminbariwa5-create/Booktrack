@@ -13,6 +13,8 @@ if (!$path || !$dir || !str_starts_with($path, $dir) || !is_file($path)) {
 }
 
 $name = preg_replace('/[^A-Za-z0-9 _-]+/', '', $book['title']) ?: 'book';
+// The page-level security policy would stop the browser's built-in PDF viewer from loading.
+header_remove('Content-Security-Policy');
 header('Content-Type: application/pdf');
 header('Content-Length: ' . filesize($path));
 header('Content-Disposition: inline; filename="' . $name . '.pdf"');

@@ -5,6 +5,8 @@ $user = require_role('member');
 $books = q_all('SELECT ' . book_columns() . ' FROM ' . books_from() . ' JOIN favorites f ON f.book_id = b.id
                 WHERE f.user_id = ? ORDER BY f.created_at DESC', [$user['id']]);
 
+$heldIds = array_map('intval', array_column(member_active_loans((int)$user['id']), 'book_id'));
+
 $title = 'Favorites';
 $active = 'favorites';
 require __DIR__ . '/includes/partials/header.php';

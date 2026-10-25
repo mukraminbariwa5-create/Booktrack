@@ -9,17 +9,8 @@ if (is_post()) {
     verify_csrf();
     $username = input('username');
     $error = attempt_login($username, (string)($_POST['password'] ?? ''));
-    if (!$error) {
-        $user = current_user(true);
-        $intended = $_SESSION['intended'] ?? null;
-        unset($_SESSION['intended']);
-        // only follow same-app paths for the intended redirect
-        if ($intended && str_starts_with($intended, base_url()) && !str_starts_with($intended, '//') && !str_contains($intended, 'logout')) {
-            $isAdminPath = str_contains($intended, '/admin/');
-            if ($isAdminPath === ($user['role'] === 'admin')) { header('Location: ' . $intended); exit; }
-        }
-        redirect(home_for($user));
-    }
+    if (!$error && two_factor_pending()) redirect('two_factor.php');
+    if (!$error) redirect_after_sign_in();
 }
 
 $title = 'Sign in';
@@ -42,13 +33,12 @@ require __DIR__ . '/includes/partials/auth_top.php';
     <div class="field">
       <div class="field__label-row">
         <label for="password">Password</label>
-        <button class="link-button" type="button" aria-expanded="false" aria-controls="forgot-help" data-toggle-help>Forgot password?</button>
+        <a class="link-button" href="<?= e(url('forgot_password.php')) ?>">Forgot password?</a>
       </div>
       <div class="input-group">
         <input class="input" id="password" name="password" type="password" autocomplete="current-password" required <?= $error ? 'autofocus' : '' ?>>
         <button class="input-group__btn" type="button" data-toggle-password aria-controls="password" aria-pressed="false">Show</button>
       </div>
-      <p class="field__help" id="forgot-help" hidden>Ask a librarian to reset it. They can set a new password for you, and you can change it again from your profile.</p>
     </div>
     <button class="btn btn--lg btn--block" type="submit">Sign in</button>
   </form>
@@ -58,9 +48,9 @@ require __DIR__ . '/includes/partials/auth_top.php';
   <p class="auth__switch">New to the library? <a class="link" href="<?= e(url('register.php')) ?>">Create an account</a></p>
 <?php endif; ?>
 
-<?php if (config('auth.show_demo_logins')): ?>
+<?php if (config('auth.show_demo_logins') || demo_mode()): ?>
   <div class="auth__demo">
-    <span>Trying the demo?</span>
+    <span>Trying the demo?<?php if (demo_mode()): ?> <span class="muted">It's shared with other visitors and resets every day. Please don't use a password from another site here.</span><?php endif; ?></span>
     <div class="auth__demo-actions">
       <button class="btn btn--outline btn--sm" type="button" data-demo-user="admin" data-demo-pass="admin123">Sign in as librarian</button>
       <button class="btn btn--outline btn--sm" type="button" data-demo-user="alice" data-demo-pass="member123">Sign in as member</button>

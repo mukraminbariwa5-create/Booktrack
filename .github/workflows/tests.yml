@@ -1,0 +1,146 @@
+# Runs BookTrack's test suites on every push and pull request.
+#  - checks:   PHP syntax on every file, the library-rule tests and the chat migration test (PHP 8.1 and 8.3)
+#  - e2e:      the end-to-end suite over HTTP, against SQLite, MySQL and MariaDB
+#              (MariaDB is what XAMPP ships; the MySQL jobs import database/booktrack.sql exactly as setup.php would)
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Rules (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.1', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite, pdo_mysql, mbstring, gd
+          coverage: none
+      - name: Syntax check
+        run: find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 php -l > /dev/null
+      - name: Library rules
+        run: php tests/rules_test.php
+      - name: Chat migration
+        run: php tests/chat_migration_test.php
+
+  e2e-sqlite:
+    name: End-to-end (SQLite)
+    runs-on: ubuntu-latest
+    env:
+      BOOKTRACK_URL: http://127.0.0.1:8100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_sqlite, pdo_mysql, mbstring, gd
+          coverage: none
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+
+      - name: Create the SQLite database
+        run: |
+          php tests/make_sqlite.php "$RUNNER_TEMP/booktrack.sqlite"
+          echo "BOOKTRACK_SQLITE=$RUNNER_TEMP/booktrack.sqlite" >> "$GITHUB_ENV"
+
+      - name: Start BookTrack
+        run: |
+          php -S 127.0.0.1:8100 > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 1 30); do curl -sf "$BOOKTRACK_URL/login.php" > /dev/null && break; sleep 1; done
+
+      - name: End-to-end tests
+        run: python tests/e2e_test.py
+
+      - name: Server log
+        if: failure()
+        run: cat "$RUNNER_TEMP/server.log"
+
+  e2e-mysql:
+    name: End-to-end (${{ matrix.db }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # like shared hosting: a database made in advance, a user limited to it, installed with setup.php
+          - db: 'mysql:8.0'
+            install: setup
+          # like XAMPP: database/booktrack.sql imported as is (phpMyAdmin or the mysql client)
+          - db: 'mariadb:10.11'
+            install: import
+    services:
+      db:
+        image: ${{ matrix.db }}
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: 'yes'
+        ports:
+          - 3306:3306
+    env:
+      BOOKTRACK_URL: http://127.0.0.1:8100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_sqlite, pdo_mysql, mbstring, gd
+          coverage: none
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+
+      - name: Wait for the database server
+        run: for i in $(seq 1 60); do mysqladmin ping -h 127.0.0.1 -u root --silent && break; sleep 2; done
+
+      - name: Import database/booktrack.sql
+        if: matrix.install == 'import'
+        run: |
+          mysql -h 127.0.0.1 -u root < database/booktrack.sql
+          mysql -h 127.0.0.1 -u root -e "SELECT COUNT(*) AS books FROM booktrack_v2.books; SELECT COUNT(*) AS fines FROM booktrack_v2.fines;"
+
+      - name: Prepare a hosting-style database and config.local.php
+        if: matrix.install == 'setup'
+        run: |
+          mysql -h 127.0.0.1 -u root -e "CREATE DATABASE hosted_booktrack; CREATE USER 'hosted'@'%' IDENTIFIED BY 'Hosted-Pass-1'; GRANT ALL PRIVILEGES ON hosted_booktrack.* TO 'hosted'@'%';"
+          printf '%s\n' '<?php' "return ['db' => ['name' => 'hosted_booktrack', 'user' => 'hosted', 'pass' => 'Hosted-Pass-1']];" > config.local.php
+
+      - name: Start BookTrack
+        run: |
+          php -S 127.0.0.1:8100 > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 1 30); do curl -sf "$BOOKTRACK_URL/login.php" > /dev/null && break; sleep 1; done
+
+      - name: Install with setup.php
+        if: matrix.install == 'setup'
+        run: |
+          curl -sf -X POST "$BOOKTRACK_URL/setup.php" | grep -q "Database created"
+          curl -sf "$BOOKTRACK_URL/setup.php" | grep -q "already installed"
+
+      - name: End-to-end tests
+        run: python tests/e2e_test.py
+
+      - name: Daily demo reset puts the demo data back
+        run: |
+          php tools/reset_demo.php --yes
+          php -r 'require "includes/bootstrap.php";
+            $ok = (int)q_val("SELECT COUNT(*) FROM users") === 6 && (int)q_val("SELECT COUNT(*) FROM fines") === 2
+              && (int)q_val("SELECT COUNT(*) FROM two_factor") === 0 && (int)q_val("SELECT COUNT(*) FROM books") === 16
+              && password_verify("member123", (string)q_val("SELECT password_hash FROM users WHERE username = ?", ["alice"]));
+            echo $ok ? "demo data restored\n" : "demo data NOT restored\n"; exit($ok ? 0 : 1);'
+
+      - name: Server log
+        if: failure()
+        run: cat "$RUNNER_TEMP/server.log"
