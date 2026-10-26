@@ -1,0 +1,9 @@
+# Render Blueprint for the BookTrack public demo (free plan). See docker/README.md.
+services:
+  - type: web
+    name: booktrack-demo
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /login.php
+    autoDeploy: true

@@ -144,3 +144,49 @@ jobs:
       - name: Server log
         if: failure()
         run: cat "$RUNNER_TEMP/server.log"
+
+  demo-image:
+    name: Demo container (Render)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: |
+          set -o pipefail
+          if ! docker build --progress=plain -t booktrack-demo . 2>&1 | tee build.log; then
+            echo "::error title=Docker build failed::$(tail -n 60 build.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            exit 1
+          fi
+      - name: Start it
+        run: |
+          docker run -d --name bt -p 8080:10000 booktrack-demo
+          for i in $(seq 1 60); do curl -fsS http://localhost:8080/login.php >/dev/null 2>&1 && break; sleep 2; done
+      - name: Smoke test
+        run: |
+          python3 - <<'PY'
+          import re, urllib.request, urllib.parse, http.cookiejar
+          B = 'http://localhost:8080'
+          jar = http.cookiejar.CookieJar()
+          op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+          page = op.open(B + '/login.php').read().decode()
+          assert 'Sign in as librarian' in page, 'demo buttons missing'
+          token = re.search(r'name="_token" value="([^"]+)"', page)
+          assert token, 'no CSRF token on the sign-in page'
+          data = urllib.parse.urlencode({'_token': token.group(1), 'username': 'admin', 'password': 'admin123'}).encode()
+          r = op.open(B + '/login.php', data)
+          body = r.read().decode()
+          assert '/admin' in r.geturl() or 'Sign out' in body or 'logout' in body, 'librarian sign-in failed: ' + r.geturl()
+          print('librarian signs in ->', r.geturl())
+          home = op.open(B + '/admin/index.php').read().decode()
+          assert 'Fatal error' not in home and 'Warning:' not in home, 'PHP error on the librarian overview'
+          print('librarian overview loads')
+          for p in ['/discover.php', '/index.php']:
+              t = urllib.request.urlopen(B + p).read().decode()
+              assert 'Fatal error' not in t, p
+          print('public pages load')
+          PY
+      - name: Container log
+        if: failure()
+        run: |
+          docker logs bt > container.log 2>&1 || true
+          echo "::error title=Container log::$(tail -n 40 container.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"

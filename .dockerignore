@@ -1,0 +1,8 @@
+.git
+config.local.php
+deploy
+uploads/covers/*
+!uploads/covers/.gitkeep
+uploads/pdfs/*.pdf
+storage/mail/*.eml
+**/*.sqlite
