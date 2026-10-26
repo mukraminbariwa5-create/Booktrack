@@ -28,7 +28,7 @@
   --border: #243047;
   --border-strong: #334059;
   --rail-border: #1A2335;
-  --glass: rgba(14, 20, 32, .88);
+  --glass: rgba(14, 20, 32, .96);
   --glass-strong: rgba(10, 15, 24, .92);
 
   /* text */
@@ -195,7 +195,9 @@ a.avatar:hover { box-shadow: 0 0 0 2px var(--gold); }
    level with the logo in the rail. On phones a slim bar holds the menu button. */
 .shell { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .topbar {
-  position: sticky; top: 0; z-index: 30;
+  /* above page content that lifts itself (the search box with suggestions sits at 30),
+     below the scrim (40), tab bar (45) and phone menu (50) */
+  position: sticky; top: 0; z-index: 35;
   height: var(--topbar-h);
   display: none; align-items: center; gap: 10px;
   padding: 0 var(--gutter);
@@ -205,6 +207,10 @@ a.avatar:hover { box-shadow: 0 0 0 2px var(--gold); }
   border-bottom: 1px solid transparent;
 }
 .topbar.is-scrolled { border-bottom-color: var(--border); }
+/* Browsers without blur would show the page through the see-through bar: make it solid there */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .topbar, .tabbar { background: var(--bg); }
+}
 .topbar__brand { font-family: var(--font-display); font-size: var(--fs-xl); font-weight: 700; letter-spacing: -0.01em; }
 .topbar__brand small { font-family: var(--font-body); font-size: var(--fs-sm); font-weight: 500; color: var(--muted); margin-left: 8px; letter-spacing: 0; }
 .topbar__avatar { margin-left: auto; width: 36px; height: 36px; font-size: var(--fs-xs); }
@@ -1382,7 +1388,7 @@ html.theme-switching::view-transition-new(root) { animation: theme-wipe .55s var
   --border: #D8DEE6;
   --border-strong: #A9B4C3;
   --rail-border: #DDE2E9;
-  --glass: rgba(237, 240, 244, .88);
+  --glass: rgba(237, 240, 244, .96);
   --glass-strong: rgba(247, 248, 250, .92);
   --text: #121823;
   --text-2: #2C3442;
