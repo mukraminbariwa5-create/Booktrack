@@ -2,6 +2,8 @@
 
 [![Tests](https://github.com/mukraminbariwa5-create/booktrack/actions/workflows/tests.yml/badge.svg)](https://github.com/mukraminbariwa5-create/booktrack/actions/workflows/tests.yml)
 
+**[Live demo](https://booktrack-demo.onrender.com)** · one-click librarian and member demo accounts (free hosting: the first visit can take about a minute to wake up).
+
 A library management system for small libraries, built with plain PHP and MySQL. Members browse the catalogue, borrow and renew books, and message the librarian. Librarians run the whole library from one dashboard: circulation, books, members and messages.
 
 ![Member dashboard](docs/screenshots/discover.png)
