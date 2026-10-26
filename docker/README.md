@@ -3,6 +3,7 @@
 This runs BookTrack as a **public portfolio demo** in one container: PHP 8.3 and Apache, with the demo library in SQLite. It's an alternative to [DEPLOY.md](../DEPLOY.md) (shared PHP hosting).
 
 - **Fresh data on every start.** The demo library (books, members, loans, fines) is rebuilt each time the container starts.
+- **Real covers without storing them.** Publisher cover art isn't in the repository, so on start the container fetches the demo books' covers from [Open Library](https://openlibrary.org) ([`tools/fetch_demo_covers.php`](../tools/fetch_demo_covers.php)). A book with no cover found keeps its generated cover.
 - **Demo mode is on** ([`docker/config.local.php`](config.local.php)): one-click "Sign in as librarian / member" buttons, demo accounts protected, uploads off.
 - **Free plan sleep.** Render's free plan sleeps after 15 minutes without visitors and takes about a minute to wake on the next visit. Waking up also resets the demo.
 
