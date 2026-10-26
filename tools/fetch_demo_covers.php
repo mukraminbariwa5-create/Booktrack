@@ -13,12 +13,17 @@ if (PHP_SAPI !== 'cli') {
 }
 require __DIR__ . '/../includes/bootstrap.php';
 
+/** Demo books whose title search on Open Library comes back without a cover. */
+const FALLBACK_ISBN = ['Nineteen Eighty-Four' => '9780451524935'];
+
 $found = 0;
 $missing = [];
 foreach (q_all("SELECT id, title, author, isbn, cover FROM books WHERE cover LIKE 'uploads/covers/seed-%'") as $book) {
     $target = APP_ROOT . '/' . $book['cover'];
     if (is_file($target)) continue;
     $url = find_cover_url($book);
+    // A title search can miss a famous edition; fall back to a known ISBN for those
+    if (!$url && isset(FALLBACK_ISBN[$book['title']])) $url = find_cover_url(['isbn' => FALLBACK_ISBN[$book['title']]]);
     $res = $url ? covers_http_get($url) : null;
     if (!$res || $res[0] !== 200 || !cover_image_ok($res[1])) {
         $missing[] = $book['title'];
